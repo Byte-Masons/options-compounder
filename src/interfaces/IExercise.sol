@@ -7,5 +7,14 @@ interface IExercise {
     /// @param amount The amount of options tokens to exercise
     /// @param recipient The address that receives the underlying tokens
     /// @param params Additional parameters for the exercise
-    function exercise(address from, uint256 amount, address recipient, bytes memory params) external returns (bytes memory data);
+    function exercise(
+        address from,
+        uint256 amount,
+        address recipient,
+        bytes memory params
+    ) external returns (bytes memory data);
+
+    function getPaymentAmount(
+        uint256 amount
+    ) external view returns (uint256 paymentAmount);
 }

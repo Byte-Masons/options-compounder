@@ -6,7 +6,8 @@ import "forge-std/Test.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 
-import {OptionsToken} from "../src/OptionsToken.sol";
+import {OptionsCompounder} from "../src/OptionsCompounder.sol";
+import {OptionsToken, OptionStruct} from "../src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExerciseReturnData, DiscountExercise} from "../src/exercise/DiscountExercise.sol";
 import {TestERC20} from "./mocks/TestERC20.sol";
 import {BalancerOracle} from "../src/oracles/BalancerOracle.sol";
@@ -33,6 +34,7 @@ contract OptionsTokenTest is Test {
     BalancerOracle oracle;
     MockBalancerTwapOracle balancerTwapOracle;
     TestERC20 paymentToken;
+    OptionsCompounder optionsCompounder;
     address underlyingToken;
 
     string OPTIMISM_MAINNET_URL = vm.envString("RPC_URL_MAINNET");
@@ -74,6 +76,11 @@ contract OptionsTokenTest is Test {
             oracle,
             treasury
         );
+        optionsCompounder = new OptionsCompounder(
+            address(paymentToken),
+            address(optionsToken)
+        );
+
         TestERC20(underlyingToken).mint(address(exerciser), 1e20 ether);
 
         // add exerciser to the list of options
@@ -103,6 +110,15 @@ contract OptionsTokenTest is Test {
         assertEqDecimal(optionsToken.balanceOf(address(this)), amount, 18);
     }
 
+    function test_flashloanHappyPath(uint256 amount, address recipient) public {
+        // mint options tokens
+        vm.prank(tokenAdmin);
+        optionsToken.mint(address(this), amount);
+        optionsToken.transfer(address(optionsCompounder), amount);
+
+        optionsCompounder.myFlashLoanCall(amount, address(exerciser));
+    }
+
     function test_exerciseHappyPath(uint256 amount, address recipient) public {
         amount = bound(amount, 0, MAX_SUPPLY);
 
@@ -117,6 +133,24 @@ contract OptionsTokenTest is Test {
                 ORACLE_MIN_PRICE_DENOM
             )
         );
+        console2.log("Expected amount 1: ", expectedPaymentAmount);
+        //bytes memory dummyArg;
+        // (, bytes memory data) = address(optionsToken).staticcall(
+        //     abi.encodeWithSignature(
+        //         "getPaymentAmount(uint256, address)",
+        //         amount,
+        //         address(exerciser)
+        //     )
+        // );
+        uint256 retVal = optionsToken.getPaymentAmount(
+            amount,
+            address(exerciser)
+        );
+        // retVal = abi.decode(data, (uint256));
+        console2.log("Expected amount 2rea: ", retVal);
+        // expectedPaymentAmount = retVal.paymentAmount;
+        // console2.log("Expected amount 2: ", expectedPaymentAmount);
+
         paymentToken.mint(address(this), expectedPaymentAmount);
 
         // exercise options tokens
@@ -266,6 +300,15 @@ contract OptionsTokenTest is Test {
                 ORACLE_MIN_PRICE_DENOM
             )
         );
+        console2.log("Expected amount 1: ", expectedPaymentAmount);
+        //bytes memory dummyArg;
+        (, bytes memory data) = address(optionsToken).staticcall(
+            abi.encodeWithSignature("testOption(address)", address(this))
+        );
+        // DiscountExerciseReturnData memory retVal;
+        // retVal = abi.decode(data, (DiscountExerciseReturnData));
+        expectedPaymentAmount = abi.decode(data, (uint256));
+        console2.log("Expected amount 2: ", expectedPaymentAmount);
         paymentToken.mint(address(this), expectedPaymentAmount);
 
         // exercise options tokens which should fail

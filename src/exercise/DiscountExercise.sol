@@ -32,7 +32,12 @@ contract DiscountExercise is BaseExercise, Owned {
     error Exercise__SlippageTooHigh();
 
     /// Events
-    event Exercised(address indexed sender, address indexed recipient, uint256 amount, uint256 paymentAmount);
+    event Exercised(
+        address indexed sender,
+        address indexed recipient,
+        uint256 amount,
+        uint256 paymentAmount
+    );
     event SetOracle(IOracle indexed newOracle);
     event SetTreasury(address indexed newTreasury);
 
@@ -78,14 +83,28 @@ contract DiscountExercise is BaseExercise, Owned {
     /// @param amount The amount of options tokens to exercise
     /// @param recipient The recipient of the purchased underlying tokens
     /// @param params Extra parameters to be used by the exercise function
-    function exercise(address from, uint256 amount, address recipient, bytes memory params)
-        external
-        virtual
-        override
-        onlyOToken
-        returns (bytes memory data)
-    {
+    function exercise(
+        address from,
+        uint256 amount,
+        address recipient,
+        bytes memory params
+    ) external virtual override onlyOToken returns (bytes memory data) {
         return _exercise(from, amount, recipient, params);
+    }
+
+    function getPaymentAmount(
+        uint256 amount
+    ) external view override returns (uint256 paymentAmount) {
+        paymentAmount = amount.mulWadUp(oracle.getPrice());
+        return paymentAmount;
+    }
+
+    function testOption(
+        address addr
+    ) external view returns (bytes memory data) {
+        //uint256 paymentAmount = amount.mulWadUp(oracle.getPrice());
+        data = abi.encode(DiscountExerciseReturnData({paymentAmount: 666}));
+        return data;
     }
 
     /// Owner functions
@@ -106,26 +125,29 @@ contract DiscountExercise is BaseExercise, Owned {
 
     /// Internal functions
 
-    function _exercise(address from, uint256 amount, address recipient, bytes memory params)
-        internal
-        virtual
-        returns (bytes memory data)
-    {
+    function _exercise(
+        address from,
+        uint256 amount,
+        address recipient,
+        bytes memory params
+    ) internal virtual returns (bytes memory data) {
         // decode params
-        DiscountExerciseParams memory _params = abi.decode(params, (DiscountExerciseParams));
+        DiscountExerciseParams memory _params = abi.decode(
+            params,
+            (DiscountExerciseParams)
+        );
 
         // transfer payment tokens from user to the treasury
         uint256 paymentAmount = amount.mulWadUp(oracle.getPrice());
-        if (paymentAmount > _params.maxPaymentAmount) revert Exercise__SlippageTooHigh();
+        if (paymentAmount > _params.maxPaymentAmount)
+            revert Exercise__SlippageTooHigh();
         paymentToken.safeTransferFrom(from, treasury, paymentAmount);
 
-        // mint underlying tokens to recipient
+        // // mint underlying tokens to recipient
         underlyingToken.safeTransfer(recipient, amount);
 
         data = abi.encode(
-            DiscountExerciseReturnData({
-                paymentAmount: paymentAmount
-            })
+            DiscountExerciseReturnData({paymentAmount: paymentAmount})
         );
 
         emit Exercised(from, recipient, amount, paymentAmount);
