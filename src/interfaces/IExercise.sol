@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.13;
 
+struct DiscountExerciseParams {
+    uint256 maxPaymentAmount;
+}
+
+struct DiscountExerciseReturnData {
+    uint256 paymentAmount;
+}
+
 interface IExercise {
     /// @notice Exercise the options token
     /// @param from Address to exercise options tokens from.
@@ -17,4 +25,8 @@ interface IExercise {
     function getPaymentAmount(
         uint256 amount
     ) external view returns (uint256 paymentAmount);
+
+    function getUnderlyingToken() external view returns (address);
+
+    function getPaymentToken() external view returns (address);
 }

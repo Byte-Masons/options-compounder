@@ -35,7 +35,12 @@ contract BalancerOracle is IOracle, Owned {
     /// Events
     /// -----------------------------------------------------------------------
 
-    event SetParams(uint16 multiplier, uint56 secs, uint56 ago, uint128 minPrice);
+    event SetParams(
+        uint16 multiplier,
+        uint56 secs,
+        uint56 ago,
+        uint128 minPrice
+    );
 
     /// -----------------------------------------------------------------------
     /// Constants
@@ -113,8 +118,10 @@ contract BalancerOracle is IOracle, Owned {
 
         // ensure the Balancer oracle can return a TWAP value for the specified window
         {
-            uint256 largestSafeQueryWindow = balancerTwapOracle.getLargestSafeQueryWindow();
-            if (secs_ + ago_ > largestSafeQueryWindow) revert BalancerOracle__TWAPOracleNotReady();
+            uint256 largestSafeQueryWindow = balancerTwapOracle
+                .getLargestSafeQueryWindow();
+            if (secs_ + ago_ > largestSafeQueryWindow)
+                revert BalancerOracle__TWAPOracleNotReady();
         }
 
         /// -----------------------------------------------------------------------
@@ -123,7 +130,10 @@ contract BalancerOracle is IOracle, Owned {
 
         // query Balancer oracle to get TWAP value
         {
-            IBalancerTwapOracle.OracleAverageQuery[] memory queries = new IBalancerTwapOracle.OracleAverageQuery[](1);
+            IBalancerTwapOracle.OracleAverageQuery[]
+                memory queries = new IBalancerTwapOracle.OracleAverageQuery[](
+                    1
+                );
             queries[0] = IBalancerTwapOracle.OracleAverageQuery({
                 variable: IBalancerTwapOracle.Variable.PAIR_PRICE,
                 secs: secs_,
@@ -151,7 +161,12 @@ contract BalancerOracle is IOracle, Owned {
     /// would be (block.timestamp - secs - ago, block.timestamp - ago].
     /// @param minPrice_ The minimum value returned by getPrice(). Maintains a floor for the
     /// price to mitigate potential attacks on the TWAP oracle.
-    function setParams(uint16 multiplier_, uint56 secs_, uint56 ago_, uint128 minPrice_) external onlyOwner {
+    function setParams(
+        uint16 multiplier_,
+        uint56 secs_,
+        uint56 ago_,
+        uint128 minPrice_
+    ) external onlyOwner {
         multiplier = multiplier_;
         secs = secs_;
         ago = ago_;

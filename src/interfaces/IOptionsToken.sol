@@ -18,4 +18,8 @@ interface IOptionsToken {
         uint256 amount,
         address option
     ) external view returns (uint256 paymentAmount);
+
+    function getUnderlyingToken(address option) external view returns (address);
+
+    function getPaymentToken(address option) external view returns (address);
 }

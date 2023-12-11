@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.13;
 
-import {IExercise} from "../interfaces/IExercise.sol";
+import "../interfaces/IExercise.sol";
 import {OptionsToken} from "../OptionsToken.sol";
 
 abstract contract BaseExercise is IExercise {
@@ -34,4 +34,8 @@ abstract contract BaseExercise is IExercise {
     function getPaymentAmount(
         uint256 amount
     ) external view virtual returns (uint256 paymentAmount);
+
+    function getUnderlyingToken() external view virtual returns (address);
+
+    function getPaymentToken() external view virtual returns (address);
 }

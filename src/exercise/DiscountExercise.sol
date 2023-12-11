@@ -1,22 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.13;
 
+import {console2} from "forge-std/Test.sol";
+
 import {Owned} from "solmate/auth/Owned.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
-import {BaseExercise} from "../exercise/BaseExercise.sol";
+import {BaseExercise, DiscountExerciseParams, DiscountExerciseReturnData} from "../exercise/BaseExercise.sol";
 import {IOracle} from "../interfaces/IOracle.sol";
 import {OptionsToken} from "../OptionsToken.sol";
-
-struct DiscountExerciseParams {
-    uint256 maxPaymentAmount;
-}
-
-struct DiscountExerciseReturnData {
-    uint256 paymentAmount;
-}
+import {IERC20} from "../interfaces/IERC20.sol";
 
 /// @title Options Token Exercise Contract
 /// @author @bigbadbeard, @lookee, @eidolon
@@ -26,6 +21,7 @@ struct DiscountExerciseReturnData {
 contract DiscountExercise is BaseExercise, Owned {
     /// Library usage
     using SafeTransferLib for ERC20;
+    using SafeTransferLib for IERC20;
     using FixedPointMathLib for uint256;
 
     /// Errors
@@ -44,7 +40,7 @@ contract DiscountExercise is BaseExercise, Owned {
     /// Immutable parameters
 
     /// @notice The token paid by the options token holder during redemption
-    ERC20 public immutable paymentToken;
+    IERC20 public immutable paymentToken;
 
     /// @notice The underlying token purchased during redemption
     ERC20 public immutable underlyingToken;
@@ -61,7 +57,7 @@ contract DiscountExercise is BaseExercise, Owned {
     constructor(
         OptionsToken oToken_,
         address owner_,
-        ERC20 paymentToken_,
+        IERC20 paymentToken_,
         ERC20 underlyingToken_,
         IOracle oracle_,
         address treasury_
@@ -99,12 +95,12 @@ contract DiscountExercise is BaseExercise, Owned {
         return paymentAmount;
     }
 
-    function testOption(
-        address addr
-    ) external view returns (bytes memory data) {
-        //uint256 paymentAmount = amount.mulWadUp(oracle.getPrice());
-        data = abi.encode(DiscountExerciseReturnData({paymentAmount: 666}));
-        return data;
+    function getUnderlyingToken() external view override returns (address) {
+        return address(underlyingToken);
+    }
+
+    function getPaymentToken() external view override returns (address) {
+        return address(paymentToken);
     }
 
     /// Owner functions
@@ -136,15 +132,15 @@ contract DiscountExercise is BaseExercise, Owned {
             params,
             (DiscountExerciseParams)
         );
-
         // transfer payment tokens from user to the treasury
         uint256 paymentAmount = amount.mulWadUp(oracle.getPrice());
         if (paymentAmount > _params.maxPaymentAmount)
             revert Exercise__SlippageTooHigh();
-        paymentToken.safeTransferFrom(from, treasury, paymentAmount);
+        console2.log("After calcs ", msg.sender, from, paymentAmount);
+        paymentToken.transferFrom(from, treasury, paymentAmount);
 
-        // // mint underlying tokens to recipient
-        underlyingToken.safeTransfer(recipient, amount);
+        // mint underlying tokens to recipient
+        underlyingToken.safeTransfer(recipient, amount); //should be amount
 
         data = abi.encode(
             DiscountExerciseReturnData({paymentAmount: paymentAmount})

@@ -145,12 +145,14 @@ contract OptionsToken is IOptionsToken, ERC20, Owned, IERC20Mintable {
         return paymentAmount;
     }
 
-    function testOption(uint256 amount) external view returns (uint256 data) {
-        //data = abi.encode(OptionStruct({paymentAmount: 777}));
-        //OptionStruct memory retVal = abi.decode(data, (OptionStruct));
-        // uint256 expectedPaymentAmount = retVal.paymentAmount;
-        // console2.log("Expected amount 2: ", expectedPaymentAmount);
-        return 666;
+    function getUnderlyingToken(
+        address option
+    ) external view returns (address) {
+        return IExercise(option).getUnderlyingToken();
+    }
+
+    function getPaymentToken(address option) external view returns (address) {
+        return IExercise(option).getPaymentToken();
     }
 
     /// -----------------------------------------------------------------------
@@ -168,7 +170,6 @@ contract OptionsToken is IOptionsToken, ERC20, Owned, IERC20Mintable {
 
         // skip if option is not active
         if (!isOption[option]) revert OptionsToken__NotOption();
-
         // transfer options tokens from msg.sender to address(0)
         // we transfer instead of burn because TokenAdmin cares about totalSupply
         // which we don't want to change in order to follow the emission schedule
