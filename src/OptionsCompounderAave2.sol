@@ -156,7 +156,7 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         address onBehalfOf = address(this);
         uint16 referralCode = 0;
         uint256 paymentAmount;
-
+        uint256 initialBalance = paymentToken.balanceOf(address(this));
         flashloanFinished = false;
         lastExecutor = msg.sender;
 
@@ -172,7 +172,12 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         uint256[] memory modes = new uint256[](2);
         modes[0] = 0;
 
-        bytes memory params = abi.encode(amount, option, msg.sender);
+        bytes memory params = abi.encode(
+            amount,
+            option,
+            msg.sender,
+            initialBalance
+        );
 
         LENDING_POOL.flashLoan(
             receiverAddress,
@@ -203,14 +208,15 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         uint256 premium,
         bytes calldata params
     ) private returns (uint256) {
-        (uint256 optionsAmount, address option, address sender) = abi.decode(
-            params,
-            (uint256, address, address)
-        );
+        (
+            uint256 optionsAmount,
+            address option,
+            address sender,
+            uint256 initialBalance
+        ) = abi.decode(params, (uint256, address, address, uint256));
         uint256 _gain = 0;
         address underlyingToken = optionToken.getUnderlyingToken(option);
         IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
-        uint256 initialBalance = paymentToken.balanceOf(address(this));
         bytes memory exerciseParams = abi.encode(
             DiscountExerciseParams({maxPaymentAmount: amount})
         );
@@ -282,14 +288,14 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         console2.log("2.Balance of paymentToken: ", assetBalance);
         console2.log("2.Amount to pay back: ", totalAmount);
 
-        if (assetBalance < totalAmount) {
+        if ((assetBalance - initialBalance) < totalAmount) {
             revert OptionsCompounder__NotEnoughFunsToPayFlashloan(
                 assetBalance,
                 totalAmount
             );
         }
-        _gain = assetBalance - initialBalance;
-        senderToBalance[sender] = assetBalance - totalAmount; // Question: still we shall use safe math ?
+        _gain = (assetBalance - initialBalance) - totalAmount;
+        senderToBalance[sender] = _gain; // Question: still we shall use safe math ?
         IERC20(asset).approve(address(LENDING_POOL), totalAmount);
 
         return _gain;
