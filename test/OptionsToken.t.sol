@@ -4,13 +4,12 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
-import {IERC20} from "../src/interfaces/IERC20.sol";
 
 import {OptionsToken} from "../src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExerciseReturnData, DiscountExercise} from "../src/exercise/DiscountExercise.sol";
-import {TestERC20} from "./mocks/TestERC20.sol";
+import {TestERC20Mintable} from "./mocks/TestERC20Mintable.sol";
 import {BalancerOracle} from "../src/oracles/BalancerOracle.sol";
+import {IERC20Mintable} from "../src/interfaces/IERC20Mintable.sol";
 import {MockBalancerTwapOracle} from "./mocks/MockBalancerTwapOracle.sol";
 
 contract OptionsTokenTest is Test {
@@ -33,10 +32,8 @@ contract OptionsTokenTest is Test {
     DiscountExercise exerciser;
     BalancerOracle oracle;
     MockBalancerTwapOracle balancerTwapOracle;
-    TestERC20 paymentToken;
-    address underlyingToken;
-
-    string OPTIMISM_MAINNET_URL = vm.envString("RPC_URL_MAINNET");
+    TestERC20Mintable paymentToken;
+    IERC20Mintable underlyingToken;
 
     function setUp() public {
         // set up accounts
@@ -58,8 +55,8 @@ contract OptionsTokenTest is Test {
             ORACLE_AGO,
             ORACLE_MIN_PRICE
         );
-        paymentToken = new TestERC20();
-        underlyingToken = address(new TestERC20());
+        paymentToken = new TestERC20Mintable();
+        underlyingToken = IERC20Mintable(address(new TestERC20Mintable()));
         optionsToken = new OptionsToken(
             "TIT Call Option Token",
             "oTIT",
@@ -70,16 +67,15 @@ contract OptionsTokenTest is Test {
         exerciser = new DiscountExercise(
             optionsToken,
             owner,
-            IERC20(address(paymentToken)),
-            ERC20(underlyingToken),
+            paymentToken,
+            underlyingToken,
             oracle,
             treasury
         );
-        TestERC20(underlyingToken).mint(address(exerciser), 1e20 ether);
 
         // add exerciser to the list of options
         vm.startPrank(owner);
-        optionsToken.setOption(address(exerciser), true);
+        optionsToken.addOption(address(exerciser), true);
         vm.stopPrank();
 
         // set up contracts
@@ -127,7 +123,7 @@ contract OptionsTokenTest is Test {
         bytes memory returnBytes = optionsToken.exercise(
             amount,
             recipient,
-            address(exerciser),
+            0,
             abi.encode(params)
         );
 
@@ -199,7 +195,7 @@ contract OptionsTokenTest is Test {
         bytes memory returnBytes = optionsToken.exercise(
             amount,
             recipient,
-            address(exerciser),
+            0,
             abi.encode(params)
         );
 
@@ -274,12 +270,7 @@ contract OptionsTokenTest is Test {
             maxPaymentAmount: expectedPaymentAmount - 1
         });
         vm.expectRevert(bytes4(keccak256("Exercise__SlippageTooHigh()")));
-        optionsToken.exercise(
-            amount,
-            recipient,
-            address(exerciser),
-            abi.encode(params)
-        );
+        optionsToken.exercise(amount, recipient, 0, abi.encode(params));
     }
 
     function test_exerciseTwapOracleNotReady(
@@ -319,12 +310,7 @@ contract OptionsTokenTest is Test {
         vm.expectRevert(
             bytes4(keccak256("BalancerOracle__TWAPOracleNotReady()"))
         );
-        optionsToken.exercise(
-            amount,
-            recipient,
-            address(exerciser),
-            abi.encode(params)
-        );
+        optionsToken.exercise(amount, recipient, 0, abi.encode(params));
     }
 
     function test_exercisePastDeadline(
@@ -356,7 +342,7 @@ contract OptionsTokenTest is Test {
         optionsToken.exercise(
             amount,
             recipient,
-            address(exerciser),
+            0,
             abi.encode(params),
             deadline
         );
@@ -402,7 +388,7 @@ contract OptionsTokenTest is Test {
 
         // set option inactive
         vm.prank(owner);
-        optionsToken.setOption(address(exerciser), false);
+        optionsToken.setOptionActive(0, false);
 
         // mint payment tokens
         uint256 expectedPaymentAmount = amount.mulWadUp(
@@ -417,12 +403,7 @@ contract OptionsTokenTest is Test {
         DiscountExerciseParams memory params = DiscountExerciseParams({
             maxPaymentAmount: expectedPaymentAmount
         });
-        vm.expectRevert(bytes4(keccak256("OptionsToken__NotOption()")));
-        optionsToken.exercise(
-            amount,
-            recipient,
-            address(exerciser),
-            abi.encode(params)
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsToken__NotActive()")));
+        optionsToken.exercise(amount, recipient, 0, abi.encode(params));
     }
 }
