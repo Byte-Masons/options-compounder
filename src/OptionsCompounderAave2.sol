@@ -18,7 +18,7 @@ error OptionsCompounder__NotEnoughFunds();
 error OptionsCompounder__NotAStrategy();
 error OptionsCompounder__StrategyNotFound();
 error OptionsCompounder__StrategyAlreadyExists();
-error OptionsCompounder__NotEnoughFunsToPayFlashloan(
+error OptionsCompounder__FlashloanNotProfitable(
     uint256 fundsAvailable,
     uint256 fundsToPay
 );
@@ -27,6 +27,8 @@ error OptionsCompounder__NotEnoughFunsToPayFlashloan(
 contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
+    address constant BEETX_VAULT_OP =
+        0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
     /* Storages */
     IOptionsToken private optionToken;
@@ -66,7 +68,7 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         swapperSwaps = ISwapperSwaps(_reaperSwapper);
 
         /* address to balancer-like vault (default is address to Beetx vault on optimism chain) */
-        vaultAddress = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
+        vaultAddress = BEETX_VAULT_OP;
         for (uint8 idx = 0; idx < _strategies.length; idx++) {
             strategies.push(_strategies[idx]);
         }
@@ -155,12 +157,9 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         address receiverAddress = address(this);
         address onBehalfOf = address(this);
         uint16 referralCode = 0;
-        uint256 paymentAmount;
         uint256 initialBalance = paymentToken.balanceOf(address(this));
         flashloanFinished = false;
         lastExecutor = msg.sender;
-
-        paymentAmount = optionToken.getPaymentAmount(amount, option);
 
         address[] memory assets = new address[](1);
         assets[0] = address(paymentToken);
@@ -197,6 +196,8 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
             revert OptionsCompounder__NotEnoughFunds();
         }
         senderToBalance[msg.sender] = 0;
+        /* Get payment tokens again to make sure there is no change between 
+        harvest and excersice */
         IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
         IERC20(paymentToken).transfer(msg.sender, allSendersFunds);
     }
@@ -215,6 +216,8 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
             uint256 initialBalance
         ) = abi.decode(params, (uint256, address, address, uint256));
         uint256 _gain = 0;
+        /* Get underlying and payment tokens again to make sure there is no change between 
+        harvest and excersice */
         address underlyingToken = optionToken.getUnderlyingToken(option);
         IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
         bytes memory exerciseParams = abi.encode(
@@ -255,11 +258,6 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         );
         console2.log("[After] BalanceOfOATHToken: ", balanceOfUnderlyingToken);
 
-        /* Approve the LendingPool contract allowance to *pull* the owed amount */
-        IERC20(underlyingToken).approve(
-            address(swapperSwaps),
-            balanceOfUnderlyingToken
-        );
         /* Calculate total amount to return */
         uint256 totalAmount = amount + premium;
         MinAmountOutData memory minAmountOutData = MinAmountOutData(
@@ -267,6 +265,11 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
             0 // temporar 0
         );
 
+        /* Approve the underlying token to make swap */
+        IERC20(underlyingToken).approve(
+            address(swapperSwaps),
+            balanceOfUnderlyingToken
+        );
         /* Swap underlying token to payment token (asset) */
         // Question: Now there is an assumption that payment token is the strategy "want" token
         // If we would like to have different want token, here is the place to querry strategy about it
@@ -282,20 +285,20 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
             "2.Balance of asset: ",
             IERC20(asset).balanceOf(address(this))
         );
-
+        /* Asset and paymentToken are the same addresses */
         /* Repay the debt and revert if it is not profitable */
         uint256 assetBalance = paymentToken.balanceOf(address(this));
         console2.log("2.Balance of paymentToken: ", assetBalance);
         console2.log("2.Amount to pay back: ", totalAmount);
 
         if ((assetBalance - initialBalance) < totalAmount) {
-            revert OptionsCompounder__NotEnoughFunsToPayFlashloan(
-                assetBalance,
+            revert OptionsCompounder__FlashloanNotProfitable(
+                (assetBalance - initialBalance),
                 totalAmount
             );
         }
-        _gain = (assetBalance - initialBalance) - totalAmount;
-        senderToBalance[sender] = _gain; // Question: still we shall use safe math ?
+        _gain = (assetBalance - initialBalance) - totalAmount; // Question: still we shall use safe math ?
+        senderToBalance[sender] = _gain;
         IERC20(asset).approve(address(LENDING_POOL), totalAmount);
 
         return _gain;

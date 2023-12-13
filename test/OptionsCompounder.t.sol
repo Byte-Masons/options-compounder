@@ -395,7 +395,7 @@ contract OptionsTokenTest is Test {
         vm.expectRevert();
         optionsCompounder.harvestOTokens(amount, address(exerciser));
         // bytes4(
-        //     keccak256("OptionsCompounder__NotEnoughFunsToPayFlashloan()")
+        //     keccak256("OptionsCompounder__FlashloanNotProfitable()")
         // ) - cannot expect specific values in error
         console2.log(
             "OptionsCompounder between flashloan redemption: ",

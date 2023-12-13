@@ -10,7 +10,7 @@ import "./interfaces/IERC20.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "./helpers/ReaperSwapper.sol";
 
 error OptionsCompounder__NotOption();
-error OptionsCompounder__NotEnoughFunsToPayFlashloan(
+error OptionsCompounder__FlashloanNotProfitable(
     uint256 fundsAvailable,
     uint256 fundsToPay
 );
@@ -129,7 +129,7 @@ contract OptionsCompounder is FlashLoanSimpleReceiverBase {
         );
         uint256 assetBalance = IERC20(asset).balanceOf(address(this));
         if (assetBalance < totalAmount) {
-            revert OptionsCompounder__NotEnoughFunsToPayFlashloan(
+            revert OptionsCompounder__FlashloanNotProfitable(
                 assetBalance,
                 totalAmount
             );
