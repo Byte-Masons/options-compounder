@@ -22,92 +22,45 @@ error OptionsCompounder__FlashloanNotProfitable(
     uint256 fundsAvailable,
     uint256 fundsToPay
 );
+address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
 /* Main contract */
-contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
+contract OptionsCompounder is FlashLoanReceiverBase {
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
-    address constant BEETX_VAULT_OP =
-        0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
     /* Storages */
     IOptionsToken private optionToken;
     ISwapperSwaps private swapperSwaps;
-    address private vaultAddress; // BEETx vault not a strategy vault
-    address[] private strategies;
     uint256 gain = 0;
 
-    address lastExecutor;
     bool flashloanFinished = true;
     mapping(address => uint256) senderToBalance; // storage variable which tracks amount to withdraw by address
-
-    modifier onlyStrategy() {
-        if (false == isStrategyAdded(msg.sender)) {
-            revert OptionsCompounder__NotAStrategy();
-        }
-        _;
-    }
 
     /**
      * List of params which are initiated at the begining:
      * @param _optionToken - option token address which allows to redeem underlying token via operation "exercise"
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
      * @param _reaperSwapper - address to contract allowing to swap tokens in easy way
-     * @param _strategies - strategies which can use this module
      * */
     constructor(
         address _optionToken,
         address _addressProvider,
-        address _reaperSwapper,
-        address[] memory _strategies
-    )
-        FlashLoanReceiverBase(ILendingPoolAddressesProvider(_addressProvider))
-        Ownable(msg.sender)
-    {
+        address _reaperSwapper
+    ) FlashLoanReceiverBase(ILendingPoolAddressesProvider(_addressProvider)) {
         optionToken = IOptionsToken(_optionToken);
         swapperSwaps = ISwapperSwaps(_reaperSwapper);
-
-        /* address to balancer-like vault (default is address to Beetx vault on optimism chain) */
-        vaultAddress = BEETX_VAULT_OP;
-        for (uint8 idx = 0; idx < _strategies.length; idx++) {
-            strategies.push(_strategies[idx]);
-        }
     }
 
     /***************************** Setters ***********************************/
-    /* Only owner functions */
-    function addStrategy(address _strategy) external onlyOwner {
-        if (false == isStrategyAdded(_strategy)) {
-            strategies.push(_strategy);
-        } else {
-            revert OptionsCompounder__StrategyAlreadyExists();
-        }
-    }
-
-    function removeStrategy(address _strategy) external onlyOwner {
-        address[] memory tmpStrategies = strategies;
-        bool strategyFound = false;
-        for (uint8 idx = 0; idx < tmpStrategies.length; idx++) {
-            if (
-                (tmpStrategies[idx] == _strategy) &&
-                (idx != (tmpStrategies.length - 1))
-            ) {
-                strategies[idx] = tmpStrategies[tmpStrategies.length - 1];
-                strategyFound = true;
-            }
-        }
-        if (false != strategyFound) {
-            strategies.pop();
-        } else {
-            revert OptionsCompounder__StrategyNotFound();
-        }
-    }
-
-    function setSwapper(address _swapper) external onlyOwner {
+    /* Only owner functions - in the future multi level access control*/
+    /* TODO: Access control to add ! */
+    function setSwapper(address _swapper) external {
         swapperSwaps = ISwapperSwaps(_swapper);
     }
 
-    function setOptionToken(address _optionToken) external onlyOwner {
+    /* TODO: Access control to add ! */
+    function setOptionToken(address _optionToken) external {
         optionToken = IOptionsToken(_optionToken);
     }
 
@@ -128,12 +81,14 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         ) {
             revert OptionsCompounder__TooMuchAssetsLoaned();
         }
+        /* Later the gain can be local variable */
         gain = exerciseOptionAndReturnDebt(
             assets[0],
             amounts[0],
             premiums[0],
             params
         );
+
         return true;
     }
 
@@ -141,17 +96,13 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
      * @dev function initiate flashloan in order to exercise option tokens and compound rewards
      * in underlying tokens to want token
      */
-    function harvestOTokens(
-        uint256 amount,
-        address option
-    ) public onlyStrategy {
+    function harvestOTokens(uint256 amount, address option) external {
         if (false == optionToken.isOption(option)) {
             revert OptionsCompounder__NotOption();
         }
-        IERC20(address(optionToken)).transferFrom(
-            msg.sender,
-            address(this),
-            amount
+        console2.log(
+            "Balance in this contract: ",
+            IERC20(address(optionToken)).balanceOf(address(this))
         );
         IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
         address receiverAddress = address(this);
@@ -159,7 +110,6 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         uint16 referralCode = 0;
         uint256 initialBalance = paymentToken.balanceOf(address(this));
         flashloanFinished = false;
-        lastExecutor = msg.sender;
 
         address[] memory assets = new address[](1);
         assets[0] = address(paymentToken);
@@ -190,7 +140,7 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
     }
 
     /** @dev Function withdraws all profit for specific sender (based on senderToBalance mapping) */
-    function withdrawProfit(address option) external onlyStrategy {
+    function withdrawProfit(address option) external {
         uint256 allSendersFunds = senderToBalance[msg.sender];
         if (allSendersFunds == 0) {
             revert OptionsCompounder__NotEnoughFunds();
@@ -208,14 +158,14 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         uint256 amount,
         uint256 premium,
         bytes calldata params
-    ) private returns (uint256) {
+    ) internal returns (uint256) {
         (
             uint256 optionsAmount,
             address option,
             address sender,
             uint256 initialBalance
         ) = abi.decode(params, (uint256, address, address, uint256));
-        uint256 _gain = 0;
+        uint256 operationGain = 0;
         /* Get underlying and payment tokens again to make sure there is no change between 
         harvest and excersice */
         address underlyingToken = optionToken.getUnderlyingToken(option);
@@ -279,7 +229,7 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
             asset,
             balanceOfUnderlyingToken,
             minAmountOutData,
-            vaultAddress
+            BEETX_VAULT_OP
         );
         console2.log(
             "2.Balance of asset: ",
@@ -291,36 +241,26 @@ contract OptionsCompounder is FlashLoanReceiverBase, Ownable {
         console2.log("2.Balance of paymentToken: ", assetBalance);
         console2.log("2.Amount to pay back: ", totalAmount);
 
-        if ((assetBalance - initialBalance) < totalAmount) {
+        if ((assetBalance - initialBalance) <= totalAmount) {
             revert OptionsCompounder__FlashloanNotProfitable(
                 (assetBalance - initialBalance),
                 totalAmount
             );
         }
-        _gain = (assetBalance - initialBalance) - totalAmount; // Question: still we shall use safe math ?
-        senderToBalance[sender] = _gain;
+        /* Protected by statement above */
+        operationGain = (assetBalance - initialBalance) - totalAmount;
+
+        /* Transfer gain to the sender */
+        IERC20(paymentToken).transfer(sender, operationGain);
+
+        /* Approve lending pool to spend borrowed tokens + premium */
         IERC20(asset).approve(address(LENDING_POOL), totalAmount);
 
-        return _gain;
+        return operationGain;
     }
 
     /***************************** Getters ***********************************/
-    function isStrategyAdded(address _strategy) public view returns (bool) {
-        address[] memory tmpStrategies = strategies;
-        bool strategyFound = false;
-        for (uint8 idx = 0; idx < tmpStrategies.length; idx++) {
-            if (tmpStrategies[idx] == _strategy) {
-                strategyFound = true;
-                break;
-            }
-        }
-        return strategyFound;
-    }
-
-    function getNumberOfStrategiesAvailable() external view returns (uint256) {
-        return strategies.length;
-    }
-
+    /* Temporary for testing - apy will be caluclated in vault */
     function getLastGain() external view returns (uint256) {
         return gain;
     }

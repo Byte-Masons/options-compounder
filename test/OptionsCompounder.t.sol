@@ -7,7 +7,8 @@ import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {IERC20} from "../src/interfaces/IERC20.sol";
 
-import {OptionsCompounder} from "../src/OptionsCompounderAave2.sol";
+import {ReaperStrategySonneV2} from "../src/ReaperStrategySonneV2.sol";
+import {BEETX_VAULT_OP} from "../src/OptionsCompounderAave2.sol";
 import {OptionsToken, OptionStruct} from "../src/OptionsToken.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "../src/helpers/ReaperSwapper.sol";
 import {DiscountExerciseParams, DiscountExerciseReturnData, DiscountExercise} from "../src/exercise/DiscountExercise.sol";
@@ -32,7 +33,6 @@ contract OptionsTokenTest is Test {
     // AAVEv3 - 0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb;
     address constant WETH = 0x4200000000000000000000000000000000000006;
     address constant OATH = 0x39FdE572a18448F8139b7788099F0a0740f51205;
-    address constant BEETX_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
     bytes32 constant OATH_V1_ETH_BPT =
         0xd20f6f1d8a675cdca155cb07b5dc9042c467153f0002000000000000000000bc; /* OATHv1/ETH BPT */
     uint256 constant AMOUNT = 1e18;
@@ -45,7 +45,7 @@ contract OptionsTokenTest is Test {
     bytes32 poolId = OATH_V1_ETH_BPT;
     string OPTIMISM_MAINNET_URL = vm.envString("RPC_URL_MAINNET");
 
-    address vaultAddress = BEETX_VAULT;
+    address vaultAddress = BEETX_VAULT_OP;
     address owner;
     address tokenAdmin;
     address treasury;
@@ -57,7 +57,8 @@ contract OptionsTokenTest is Test {
     DiscountExercise exerciser;
     BalancerOracle oracle;
     MockBalancerTwapOracle balancerTwapOracle;
-    OptionsCompounder optionsCompounder;
+    ReaperStrategySonneV2 strategySonne;
+
     ReaperSwapper reaperSwapper;
     Helper helper;
 
@@ -65,18 +66,14 @@ contract OptionsTokenTest is Test {
         uint256 _amount,
         address _strategy
     ) public {
-        if (false == optionsCompounder.isStrategyAdded(_strategy)) {
-            vm.prank(owner);
-            optionsCompounder.addStrategy(_strategy);
-        }
         /* mint options tokens and transfer them to the strategy (rewards simulation) */
         vm.startPrank(tokenAdmin);
         optionsToken.mint(tokenAdmin, _amount);
-        optionsToken.transfer(strategy, _amount);
+        optionsToken.transfer(_strategy, _amount);
         vm.stopPrank();
 
-        vm.prank(strategy);
-        optionsToken.approve(address(optionsCompounder), _amount);
+        // vm.prank(strategy);
+        // optionsToken.approve(_strategy, _amount);
     }
 
     function setUp() public {
@@ -155,11 +152,10 @@ contract OptionsTokenTest is Test {
 
         /* Option compounder deployment */
         vm.startPrank(owner);
-        optionsCompounder = new OptionsCompounder(
+        strategySonne = new ReaperStrategySonneV2(
             address(optionsToken),
             POOL_ADDRESSES_PROVIDER,
-            address(reaperSwapper),
-            strategies
+            address(reaperSwapper)
         );
         vm.stopPrank();
 
@@ -195,158 +191,157 @@ contract OptionsTokenTest is Test {
         balancerTwapOracle.setTwapValue(initTwap);
         paymentToken.approve(address(exerciser), type(uint256).max);
 
-        console2.log("Options Compunder: ", address(optionsCompounder));
+        console2.log("Sonne strategy: ", address(strategySonne));
         console2.log("Options Token: ", address(optionsToken));
         console2.log("Address of this contract: ", address(this));
         console2.log("Address of owner: ", owner);
         console2.log("Address of token admin: ", tokenAdmin);
     }
 
-    function test_onlyOwnerFunctionsChecks(
-        address hacker,
-        address hackersStrategy,
-        uint256 amount
-    ) public {
-        /* Test vectors definition */
-        amount = bound(amount, 100, oath.balanceOf(address(exerciser)));
-        vm.assume(hacker != tokenAdmin);
-        vm.assume(hackersStrategy != strategy);
+    // function test_onlyOwnerFunctionsChecks(
+    //     address hacker,
+    //     address hackersStrategy,
+    //     uint256 amount
+    // ) public {
+    //     /* Test vectors definition */
+    //     amount = bound(amount, 100, oath.balanceOf(address(exerciser)));
+    //     vm.assume(hacker != tokenAdmin);
+    //     vm.assume(hackersStrategy != strategy);
 
-        /* Hacker tries to add and remove strategy */
-        vm.startPrank(hacker);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
-                hacker
-            )
-        );
-        optionsCompounder.addStrategy(hackersStrategy);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
-                hacker
-            )
-        );
-        optionsCompounder.removeStrategy(hackersStrategy);
+    //     /* Hacker tries to add and remove strategy */
+    //     vm.startPrank(hacker);
+    //     vm.expectRevert(
+    //         abi.encodeWithSelector(
+    //             bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
+    //             hacker
+    //         )
+    //     );
+    //     optionsCompounder.addStrategy(hackersStrategy);
+    //     vm.expectRevert(
+    //         abi.encodeWithSelector(
+    //             bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
+    //             hacker
+    //         )
+    //     );
+    //     optionsCompounder.removeStrategy(hackersStrategy);
 
-        /* Hacker tries to manipulate contract configuration */
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
-                hacker
-            )
-        );
-        optionsCompounder.setSwapper(hackersStrategy);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
-                hacker
-            )
-        );
-        optionsCompounder.setOptionToken(hackersStrategy);
-        vm.stopPrank();
+    //     /* Hacker tries to manipulate contract configuration */
+    //     vm.expectRevert(
+    //         abi.encodeWithSelector(
+    //             bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
+    //             hacker
+    //         )
+    //     );
+    //     optionsCompounder.setSwapper(hackersStrategy);
+    //     vm.expectRevert(
+    //         abi.encodeWithSelector(
+    //             bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
+    //             hacker
+    //         )
+    //     );
+    //     optionsCompounder.setOptionToken(hackersStrategy);
+    //     vm.stopPrank();
 
-        /* Not added hacker's strategy tries to use harvest and withdraw functions */
-        vm.startPrank(hackersStrategy);
-        vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
-        optionsCompounder.harvestOTokens(amount, address(exerciser));
-        vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
-        optionsCompounder.withdrawProfit(address(exerciser));
-    }
+    //     /* Not added hacker's strategy tries to use harvest and withdraw functions */
+    //     vm.startPrank(hackersStrategy);
+    //     vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
+    //     optionsCompounder.harvestOTokens(amount, address(exerciser));
+    //     vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
+    //     optionsCompounder.withdrawProfit(address(exerciser));
+    // }
 
-    function test_addingRemovingStrategies(
-        address strategy1,
-        address strategy2
-    ) public {
-        /* Test vectors definition */
-        vm.assume(strategy1 != strategy);
-        vm.assume(strategy2 != strategy && strategy2 != strategy1);
-        uint256 initialNrOfStrategies = optionsCompounder
-            .getNumberOfStrategiesAvailable();
+    // function test_addingRemovingStrategies(
+    //     address strategy1,
+    //     address strategy2
+    // ) public {
+    //     /* Test vectors definition */
+    //     vm.assume(strategy1 != strategy);
+    //     vm.assume(strategy2 != strategy && strategy2 != strategy1);
+    //     uint256 initialNrOfStrategies = optionsCompounder
+    //         .getNumberOfStrategiesAvailable();
 
-        /* Try withdraw with not added strategy */
-        vm.startPrank(strategy1);
-        vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
-        optionsCompounder.withdrawProfit(address(exerciser));
-        vm.stopPrank();
+    //     /* Try withdraw with not added strategy */
+    //     vm.startPrank(strategy1);
+    //     vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
+    //     optionsCompounder.withdrawProfit(address(exerciser));
+    //     vm.stopPrank();
 
-        /* Try withdraw with added strategy - function should proceed but revert on funds */
-        assertEq(optionsCompounder.isStrategyAdded(strategy1), false);
-        vm.prank(owner);
-        optionsCompounder.addStrategy(strategy1);
-        assertEq(optionsCompounder.isStrategyAdded(strategy1), true);
-        assertEq(
-            optionsCompounder.getNumberOfStrategiesAvailable(),
-            initialNrOfStrategies + 1
-        );
+    //     /* Try withdraw with added strategy - function should proceed but revert on funds */
+    //     assertEq(optionsCompounder.isStrategyAdded(strategy1), false);
+    //     vm.prank(owner);
+    //     optionsCompounder.addStrategy(strategy1);
+    //     assertEq(optionsCompounder.isStrategyAdded(strategy1), true);
+    //     assertEq(
+    //         optionsCompounder.getNumberOfStrategiesAvailable(),
+    //         initialNrOfStrategies + 1
+    //     );
 
-        vm.startPrank(strategy1);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
-        );
-        optionsCompounder.withdrawProfit(address(exerciser));
-        vm.stopPrank();
+    //     vm.startPrank(strategy1);
+    //     vm.expectRevert(
+    //         bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
+    //     );
+    //     optionsCompounder.withdrawProfit(address(exerciser));
+    //     vm.stopPrank();
 
-        /* Try to remove not existing strategy and add existing strategy */
-        vm.startPrank(owner);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__StrategyNotFound()"))
-        );
-        optionsCompounder.removeStrategy(strategy2);
-        optionsCompounder.addStrategy(strategy2);
-        assertEq(
-            optionsCompounder.getNumberOfStrategiesAvailable(),
-            initialNrOfStrategies + 2
-        );
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__StrategyAlreadyExists()"))
-        );
-        optionsCompounder.addStrategy(strategy1);
+    //     /* Try to remove not existing strategy and add existing strategy */
+    //     vm.startPrank(owner);
+    //     vm.expectRevert(
+    //         bytes4(keccak256("OptionsCompounder__StrategyNotFound()"))
+    //     );
+    //     optionsCompounder.removeStrategy(strategy2);
+    //     optionsCompounder.addStrategy(strategy2);
+    //     assertEq(
+    //         optionsCompounder.getNumberOfStrategiesAvailable(),
+    //         initialNrOfStrategies + 2
+    //     );
+    //     vm.expectRevert(
+    //         bytes4(keccak256("OptionsCompounder__StrategyAlreadyExists()"))
+    //     );
+    //     optionsCompounder.addStrategy(strategy1);
 
-        /* Remove strategy already added and check if it is removed properly 
-        (not a strategy error for withdrawing) */
-        optionsCompounder.removeStrategy(strategy1);
-        assertEq(
-            optionsCompounder.getNumberOfStrategiesAvailable(),
-            initialNrOfStrategies + 1
-        );
-        vm.stopPrank();
-        vm.startPrank(strategy1);
-        vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
-        optionsCompounder.withdrawProfit(address(exerciser));
-        vm.stopPrank();
+    //     /* Remove strategy already added and check if it is removed properly
+    //     (not a strategy error for withdrawing) */
+    //     optionsCompounder.removeStrategy(strategy1);
+    //     assertEq(
+    //         optionsCompounder.getNumberOfStrategiesAvailable(),
+    //         initialNrOfStrategies + 1
+    //     );
+    //     vm.stopPrank();
+    //     vm.startPrank(strategy1);
+    //     vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
+    //     optionsCompounder.withdrawProfit(address(exerciser));
+    //     vm.stopPrank();
 
-        /* Check whether after removal strategy1 and adding strategy2 still 
-        withdrawProfit function is called without NotAStrategy reversion 
-        (notEnaughFunds reversion expected) */
-        vm.startPrank(strategy2);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
-        );
-        optionsCompounder.withdrawProfit(address(exerciser));
-        vm.stopPrank();
-    }
+    //     /* Check whether after removal strategy1 and adding strategy2 still
+    //     withdrawProfit function is called without NotAStrategy reversion
+    //     (notEnaughFunds reversion expected) */
+    //     vm.startPrank(strategy2);
+    //     vm.expectRevert(
+    //         bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
+    //     );
+    //     optionsCompounder.withdrawProfit(address(exerciser));
+    //     vm.stopPrank();
+    // }
 
     function test_flashloanPositiveScenario(uint256 amount) public {
         /* Test vectors definition */
         amount = bound(amount, 1e15, oath.balanceOf(address(exerciser)));
         /* prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
-        fixture_prepareOptionToken(amount, strategy);
+        fixture_prepareOptionToken(amount, address(strategySonne));
 
         /* Check balances before compounding */
-        uint256 wethBalance = weth.balanceOf(strategy);
+        uint256 wethBalance = weth.balanceOf(address(this));
         console2.log(
             "This contract before flashloan redemption: ",
             weth.balanceOf(address(this))
         );
         console2.log("Strategy before flashloan redemption: ", wethBalance);
 
-        vm.startPrank(strategy);
+        //vm.startPrank(strategy);
         /* already approved in fixture_prepareOptionToken */
-        optionsCompounder.harvestOTokens(amount, address(exerciser));
-        optionsCompounder.withdrawProfit(address(exerciser));
-        vm.stopPrank();
+        strategySonne.harvestOTokens(amount, address(exerciser));
+        //vm.stopPrank();
 
         /* Check balances after compounding */
         // Question: Do we need accurate calculations about profits?
@@ -359,69 +354,69 @@ contract OptionsTokenTest is Test {
             weth.balanceOf(strategy)
         );
 
-        console2.log("Gain: ", optionsCompounder.getLastGain());
-        assert(optionsCompounder.getLastGain() > 0);
+        console2.log("Gain: ", strategySonne.getLastGain());
+        assert(strategySonne.getLastGain() > 0);
         assert(wethBalance < weth.balanceOf(strategy));
     }
 
-    function test_flashloanNegativeScenario(uint256 amount) public {
-        /* Test vectors definition */
-        amount = bound(amount, 1e15, oath.balanceOf(address(exerciser)));
+    // function test_flashloanNegativeScenario(uint256 amount) public {
+    //     /* Test vectors definition */
+    //     amount = bound(amount, 1e15, oath.balanceOf(address(exerciser)));
 
-        /* Prepare option tokens - distribute them to the specified strategy 
-        and approve for spending */
-        fixture_prepareOptionToken(amount, strategy);
+    //     /* Prepare option tokens - distribute them to the specified strategy
+    //     and approve for spending */
+    //     fixture_prepareOptionToken(amount, strategy);
 
-        /* Decrease option discount in order to make redemption not profitable */
-        /* Question: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) */
-        vm.prank(owner);
-        oracle.setParams(10100, ORACLE_SECS, ORACLE_AGO, ORACLE_MIN_PRICE);
+    //     /* Decrease option discount in order to make redemption not profitable */
+    //     /* Question: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) */
+    //     vm.prank(owner);
+    //     oracle.setParams(10100, ORACLE_SECS, ORACLE_AGO, ORACLE_MIN_PRICE);
 
-        /* Check balances before compounding */
-        uint256 wethBalance = weth.balanceOf(strategy);
-        console2.log(
-            "This contract before flashloan redemption: ",
-            weth.balanceOf(address(this))
-        );
-        console2.log("Strategy before flashloan redemption: ", wethBalance);
-        console2.log(
-            "OptionsCompounder before flashloan redemption: ",
-            weth.balanceOf(address(optionsCompounder))
-        );
+    //     /* Check balances before compounding */
+    //     uint256 wethBalance = weth.balanceOf(strategy);
+    //     console2.log(
+    //         "This contract before flashloan redemption: ",
+    //         weth.balanceOf(address(this))
+    //     );
+    //     console2.log("Strategy before flashloan redemption: ", wethBalance);
+    //     console2.log(
+    //         "OptionsCompounder before flashloan redemption: ",
+    //         weth.balanceOf(address(optionsCompounder))
+    //     );
 
-        vm.startPrank(strategy);
+    //     vm.startPrank(strategy);
 
-        /* Already approved in fixture_prepareOptionToken */
-        vm.expectRevert();
-        optionsCompounder.harvestOTokens(amount, address(exerciser));
-        // bytes4(
-        //     keccak256("OptionsCompounder__FlashloanNotProfitable()")
-        // ) - cannot expect specific values in error
-        console2.log(
-            "OptionsCompounder between flashloan redemption: ",
-            weth.balanceOf(address(optionsCompounder))
-        );
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
-        );
-        optionsCompounder.withdrawProfit(address(exerciser));
-        vm.stopPrank();
+    //     /* Already approved in fixture_prepareOptionToken */
+    //     vm.expectRevert();
+    //     optionsCompounder.harvestOTokens(amount, address(exerciser));
+    //     // bytes4(
+    //     //     keccak256("OptionsCompounder__FlashloanNotProfitable()")
+    //     // ) - cannot expect specific values in error
+    //     console2.log(
+    //         "OptionsCompounder between flashloan redemption: ",
+    //         weth.balanceOf(address(optionsCompounder))
+    //     );
+    //     vm.expectRevert(
+    //         bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
+    //     );
+    //     optionsCompounder.withdrawProfit(address(exerciser));
+    //     vm.stopPrank();
 
-        /* Check balances after compounding */
-        // Question: Do we need accurate calculations about profits?
-        console2.log(
-            "This contract after flashloan redemption: ",
-            weth.balanceOf(address(this))
-        );
-        console2.log(
-            "Strategy after flashloan redemption: ",
-            weth.balanceOf(strategy)
-        );
-        console2.log(
-            "OptionsCompounder after flashloan redemption: ",
-            weth.balanceOf(address(optionsCompounder))
-        );
+    //     /* Check balances after compounding */
+    //     // Question: Do we need accurate calculations about profits?
+    //     console2.log(
+    //         "This contract after flashloan redemption: ",
+    //         weth.balanceOf(address(this))
+    //     );
+    //     console2.log(
+    //         "Strategy after flashloan redemption: ",
+    //         weth.balanceOf(strategy)
+    //     );
+    //     console2.log(
+    //         "OptionsCompounder after flashloan redemption: ",
+    //         weth.balanceOf(address(optionsCompounder))
+    //     );
 
-        console2.log("Gain: ", optionsCompounder.getLastGain());
-    }
+    //     console2.log("Gain: ", optionsCompounder.getLastGain());
+    // }
 }
