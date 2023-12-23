@@ -2,21 +2,26 @@
 
 pragma solidity ^0.8.0;
 
-import {ReaperBaseStrategyv4} from "./ReaperBaseStrategyv4.sol";
-import {IVault} from "../interfaces/IVault.sol";
-import {CErc20I} from "./CErc20I.sol";
-import {CTokenI} from "./CTokenI.sol";
-import {IComptroller} from "../interfaces/IComptroller.sol";
-import {ILeverageable} from "../interfaces/ILeverageable.sol";
-import {SafeERC20Upgradeable} from "./SafeERC20Upgradeable.sol";
-import {IERC20Upgradeable} from "../interfaces/IERC20Upgradeable.sol";
-import {MathUpgradeable} from "./MathUpgradeable.sol";
-import {ReaperMathUtils} from "./ReaperMathUtils.sol";
+import {ReaperBaseStrategyv4} from "./helpers/ReaperBaseStrategyv4.sol";
+import {IVault} from "./interfaces/IVault.sol";
+import {CErc20I} from "./helpers/CErc20I.sol";
+import {CTokenI} from "./helpers/CTokenI.sol";
+import {IComptroller} from "./interfaces/IComptroller.sol";
+import {ILeverageable} from "./interfaces/ILeverageable.sol";
+import {SafeERC20Upgradeable} from "./helpers/SafeERC20Upgradeable.sol";
+import {IERC20Upgradeable} from "./interfaces/IERC20Upgradeable.sol";
+import {MathUpgradeable} from "./helpers/MathUpgradeable.sol";
+import {ReaperMathUtils} from "./helpers/ReaperMathUtils.sol";
+import {OptionsCompounder} from "./OptionsCompounderAave2.sol";
 
 /**
  * @dev This strategy will deposit a token on Sonne to maximize yield
  */
-contract ReaperStrategySonne is ReaperBaseStrategyv4, ILeverageable {
+contract ReaperStrategySonne is
+    ReaperBaseStrategyv4,
+    ILeverageable,
+    OptionsCompounder
+{
     using ReaperMathUtils for uint256;
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
@@ -62,6 +67,8 @@ contract ReaperStrategySonne is ReaperBaseStrategyv4, ILeverageable {
         address[] memory _multisigRoles,
         address[] memory _keepers,
         address _cWant,
+        address _optionToken,
+        address _addressProvider,
         uint256 _targetLTV
     ) public initializer {
         cWant = CErc20I(_cWant);
@@ -72,6 +79,12 @@ contract ReaperStrategySonne is ReaperBaseStrategyv4, ILeverageable {
             _strategists,
             _multisigRoles,
             _keepers
+        );
+        _OptionsCompounder_Init(
+            _optionToken,
+            _addressProvider,
+            _swapper,
+            cWant.underlying()
         );
         markets = [_cWant];
         comptroller = IComptroller(cWant.comptroller());

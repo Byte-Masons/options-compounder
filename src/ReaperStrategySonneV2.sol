@@ -2,24 +2,16 @@
 
 pragma solidity ^0.8.0;
 
-import {ReaperStrategySonne} from "./helpers/ReaperStrategySonne.sol";
+import {ReaperStrategySonne} from "./ReaperStrategySonne.sol";
 import {SafeERC20Upgradeable} from "./helpers/SafeERC20Upgradeable.sol";
 import {IERC20Upgradeable} from "./interfaces/IERC20Upgradeable.sol";
-import {OptionsCompounder} from "./OptionsCompounderAave2.sol";
 
-contract ReaperStrategySonneV2 is ReaperStrategySonne, OptionsCompounder {
+contract ReaperStrategySonneV2 is ReaperStrategySonne {
     using SafeERC20Upgradeable for IERC20Upgradeable;
-
-    constructor(
-        address _optionToken,
-        address _addressProvider,
-        address _reaperSwapper
-    ) OptionsCompounder(_optionToken, _addressProvider, _reaperSwapper) {}
 
     /**
      * @dev Does one step of leveraging
      */
-
     function _leverUpStep(
         uint256 _borrowIncreaseAmount
     ) internal override returns (uint256) {

@@ -4,6 +4,7 @@
 pragma solidity ^0.8.2;
 
 import "./AddressUpgradeable.sol";
+import {console2} from "forge-std/Test.sol";
 
 /**
  * @dev This is a base contract to aid in writing upgradeable contracts, or any kind of contract that will be deployed
@@ -82,6 +83,13 @@ abstract contract Initializable {
      */
     modifier initializer() {
         bool isTopLevelCall = !_initializing;
+        console2.log("isTopLevelCall: ", isTopLevelCall);
+        console2.log("_initialized: ", isTopLevelCall);
+        console2.log("_initialized: ", isTopLevelCall);
+        console2.log(
+            "!AddressUpgradeable.isContract(address(this)): ",
+            !AddressUpgradeable.isContract(address(this))
+        );
         require(
             (isTopLevelCall && _initialized < 1) ||
                 (!AddressUpgradeable.isContract(address(this)) &&

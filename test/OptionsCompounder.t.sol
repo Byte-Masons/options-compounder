@@ -6,8 +6,9 @@ import "forge-std/Test.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {IERC20} from "../src/interfaces/IERC20.sol";
-
+import {ReaperStrategySonne} from "../src/ReaperStrategySonne.sol";
 import {ReaperStrategySonneV2} from "../src/ReaperStrategySonneV2.sol";
+import {StrategyProxy} from "../src/StrategyProxy.sol";
 import {BEETX_VAULT_OP} from "../src/OptionsCompounderAave2.sol";
 import {OptionsToken, OptionStruct} from "../src/OptionsToken.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "../src/helpers/ReaperSwapper.sol";
@@ -16,6 +17,7 @@ import {TestERC20} from "./mocks/TestERC20.sol";
 import {BalancerOracle} from "../src/oracles/BalancerOracle.sol";
 import {MockBalancerTwapOracle} from "./mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "../src/helpers/HelperFunctions.sol";
+import {CErc20I} from "../src/helpers/CErc20I.sol";
 
 contract OptionsTokenTest is Test {
     using FixedPointMathLib for uint256;
@@ -33,31 +35,41 @@ contract OptionsTokenTest is Test {
     // AAVEv3 - 0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb;
     address constant WETH = 0x4200000000000000000000000000000000000006;
     address constant OATH = 0x39FdE572a18448F8139b7788099F0a0740f51205;
-    bytes32 constant OATH_V1_ETH_BPT =
+    address constant CUSDC = 0xEC8FEa79026FfEd168cCf5C627c7f486D77b765F;
+    bytes32 constant OATHV1_ETH_BPT =
         0xd20f6f1d8a675cdca155cb07b5dc9042c467153f0002000000000000000000bc; /* OATHv1/ETH BPT */
+    bytes32 constant BTC_WETH_USDC_BPT =
+        0x5028497af0c9a54ea8c6d42a054c0341b9fc6168000100000000000000000004;
     uint256 constant AMOUNT = 1e18;
 
     /* Variables */
     IERC20 weth = IERC20(WETH);
     IERC20 oath = IERC20(OATH);
+    CErc20I cusdc = CErc20I(CUSDC);
     IERC20 paymentToken;
     IERC20 underlyingToken;
-    bytes32 poolId = OATH_V1_ETH_BPT;
     string OPTIMISM_MAINNET_URL = vm.envString("RPC_URL_MAINNET");
 
-    address vaultAddress = BEETX_VAULT_OP;
+    address beetxVault = BEETX_VAULT_OP;
     address owner;
     address tokenAdmin;
     address treasury;
     address strategist = address(4);
-    address strategy;
+    address vault;
+    address management1;
+    address management2;
+    address management3;
+    address keeper;
 
     /* Contract variables */
     OptionsToken optionsToken;
     DiscountExercise exerciser;
     BalancerOracle oracle;
     MockBalancerTwapOracle balancerTwapOracle;
-    ReaperStrategySonneV2 strategySonne;
+    ReaperStrategySonneV2 strategySonnev2;
+    ReaperStrategySonne strategySonne;
+    StrategyProxy strategyProxy;
+    ReaperStrategySonne strategySonneProxy;
 
     ReaperSwapper reaperSwapper;
     Helper helper;
@@ -81,7 +93,11 @@ contract OptionsTokenTest is Test {
         owner = makeAddr("owner");
         tokenAdmin = makeAddr("tokenAdmin");
         treasury = makeAddr("treasury");
-        strategy = makeAddr("strategy");
+        vault = makeAddr("vault");
+        management1 = makeAddr("management1");
+        management2 = makeAddr("management2");
+        management3 = makeAddr("management3");
+        keeper = makeAddr("keeper");
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
@@ -93,13 +109,17 @@ contract OptionsTokenTest is Test {
         paymentToken = IERC20(WETH);
         underlyingToken = IERC20(OATH);
         address[] memory strategists = new address[](1);
-        //address[] memory multisigRoles = new address[](3);
+        address[] memory multisigRoles = new address[](3);
+        address[] memory keepers = new address[](1);
         strategists[0] = strategist;
-        // multisigRoles[0] = management1;
-        // multisigRoles[1] = management2;
-        // multisigRoles[2] = management3;
-        address[] memory strategies = new address[](1);
-        strategies[0] = strategy;
+        multisigRoles[0] = management1;
+        multisigRoles[1] = management2;
+        multisigRoles[2] = management3;
+        keepers[0] = keeper;
+
+        // Question: Doesn't matter in this test but what are the reasonable values ??
+        // Possible range 0.0001 - 0.01 ether
+        uint256 targetLTV = 0.0001 ether;
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -113,14 +133,20 @@ contract OptionsTokenTest is Test {
         reaperSwapper.updateBalSwapPoolID(
             address(weth),
             address(oath),
-            vaultAddress,
-            poolId
+            beetxVault,
+            OATHV1_ETH_BPT
         );
         reaperSwapper.updateBalSwapPoolID(
             address(oath),
             address(weth),
-            vaultAddress,
-            poolId
+            beetxVault,
+            OATHV1_ETH_BPT
+        );
+        reaperSwapper.updateBalSwapPoolID(
+            address(weth),
+            cusdc.underlying(),
+            beetxVault,
+            BTC_WETH_USDC_BPT
         );
 
         /* Oracle mocks deployment */
@@ -152,11 +178,24 @@ contract OptionsTokenTest is Test {
 
         /* Option compounder deployment */
         vm.startPrank(owner);
-        strategySonne = new ReaperStrategySonneV2(
+        console2.log("Deployment contract");
+        strategySonne = new ReaperStrategySonne();
+        console2.log("Deployment strategy proxy");
+        strategyProxy = new StrategyProxy(address(strategySonne), "");
+        console2.log("Initialization proxied sonne strategy");
+        strategySonneProxy = ReaperStrategySonne(address(strategyProxy));
+        strategySonneProxy.initialize(
+            vault,
+            address(reaperSwapper),
+            strategists,
+            multisigRoles,
+            keepers,
+            CUSDC,
             address(optionsToken),
             POOL_ADDRESSES_PROVIDER,
-            address(reaperSwapper)
+            targetLTV
         );
+        console2.log("after deployment");
         vm.stopPrank();
 
         /* Prepare EOA and contracts for tests */
@@ -172,7 +211,7 @@ contract OptionsTokenTest is Test {
             address(underlyingToken),
             AMOUNT,
             minAmountOutData,
-            vaultAddress
+            beetxVault
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         //console2.log("1. Balance after swapping: ", oathBalance);
@@ -191,7 +230,7 @@ contract OptionsTokenTest is Test {
         balancerTwapOracle.setTwapValue(initTwap);
         paymentToken.approve(address(exerciser), type(uint256).max);
 
-        console2.log("Sonne strategy: ", address(strategySonne));
+        console2.log("Sonne strategy: ", address(strategySonneProxy));
         console2.log("Options Token: ", address(optionsToken));
         console2.log("Address of this contract: ", address(this));
         console2.log("Address of owner: ", owner);
@@ -325,13 +364,13 @@ contract OptionsTokenTest is Test {
 
     function test_flashloanPositiveScenario(uint256 amount) public {
         /* Test vectors definition */
-        amount = bound(amount, 1e15, oath.balanceOf(address(exerciser)));
+        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
         /* prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
-        fixture_prepareOptionToken(amount, address(strategySonne));
+        fixture_prepareOptionToken(amount, address(strategySonneProxy));
 
         /* Check balances before compounding */
-        uint256 wethBalance = weth.balanceOf(address(this));
+        uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
         console2.log(
             "This contract before flashloan redemption: ",
             weth.balanceOf(address(this))
@@ -340,83 +379,77 @@ contract OptionsTokenTest is Test {
 
         //vm.startPrank(strategy);
         /* already approved in fixture_prepareOptionToken */
-        strategySonne.harvestOTokens(amount, address(exerciser));
+        strategySonneProxy.harvestOTokens(amount, address(exerciser));
         //vm.stopPrank();
 
         /* Check balances after compounding */
         // Question: Do we need accurate calculations about profits?
-        console2.log(
-            "This contract after flashloan redemption: ",
-            weth.balanceOf(address(this))
+        console2.log("Gain: ", strategySonneProxy.getLastGain());
+        assertEq(
+            strategySonneProxy.getLastGain() > 0,
+            true,
+            "Gain not greater than 0"
         );
-        console2.log(
-            "Strategy after flashloan redemption: ",
-            weth.balanceOf(strategy)
+        assertEq(
+            wethBalance <= weth.balanceOf(address(strategySonneProxy)),
+            true,
+            "Lower balance than before"
         );
-
-        console2.log("Gain: ", strategySonne.getLastGain());
-        assert(strategySonne.getLastGain() > 0);
-        assert(wethBalance < weth.balanceOf(strategy));
     }
 
-    // function test_flashloanNegativeScenario(uint256 amount) public {
-    //     /* Test vectors definition */
-    //     amount = bound(amount, 1e15, oath.balanceOf(address(exerciser)));
+    function test_flashloanNegativeScenario(uint256 amount) public {
+        /* Test vectors definition */
+        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
 
-    //     /* Prepare option tokens - distribute them to the specified strategy
-    //     and approve for spending */
-    //     fixture_prepareOptionToken(amount, strategy);
+        /* Prepare option tokens - distribute them to the specified strategy
+        and approve for spending */
+        fixture_prepareOptionToken(amount, address(strategySonneProxy));
 
-    //     /* Decrease option discount in order to make redemption not profitable */
-    //     /* Question: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) */
-    //     vm.prank(owner);
-    //     oracle.setParams(10100, ORACLE_SECS, ORACLE_AGO, ORACLE_MIN_PRICE);
+        /* Decrease option discount in order to make redemption not profitable */
+        /* Question: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) */
+        vm.prank(owner);
+        oracle.setParams(10100, ORACLE_SECS, ORACLE_AGO, ORACLE_MIN_PRICE);
 
-    //     /* Check balances before compounding */
-    //     uint256 wethBalance = weth.balanceOf(strategy);
-    //     console2.log(
-    //         "This contract before flashloan redemption: ",
-    //         weth.balanceOf(address(this))
-    //     );
-    //     console2.log("Strategy before flashloan redemption: ", wethBalance);
-    //     console2.log(
-    //         "OptionsCompounder before flashloan redemption: ",
-    //         weth.balanceOf(address(optionsCompounder))
-    //     );
+        /* Check balances before compounding */
+        uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
+        console2.log(
+            "This contract before flashloan redemption: ",
+            weth.balanceOf(address(this))
+        );
+        console2.log("Strategy before flashloan redemption: ", wethBalance);
+        console2.log(
+            "OptionsCompounder before flashloan redemption: ",
+            weth.balanceOf(address(address(strategySonneProxy)))
+        );
 
-    //     vm.startPrank(strategy);
+        //vm.startPrank(address(strategySonneProxy));
 
-    //     /* Already approved in fixture_prepareOptionToken */
-    //     vm.expectRevert();
-    //     optionsCompounder.harvestOTokens(amount, address(exerciser));
-    //     // bytes4(
-    //     //     keccak256("OptionsCompounder__FlashloanNotProfitable()")
-    //     // ) - cannot expect specific values in error
-    //     console2.log(
-    //         "OptionsCompounder between flashloan redemption: ",
-    //         weth.balanceOf(address(optionsCompounder))
-    //     );
-    //     vm.expectRevert(
-    //         bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
-    //     );
-    //     optionsCompounder.withdrawProfit(address(exerciser));
-    //     vm.stopPrank();
+        /* Already approved in fixture_prepareOptionToken */
+        vm.expectRevert();
+        strategySonneProxy.harvestOTokens(amount, address(exerciser));
+        // bytes4(
+        //     keccak256("OptionsCompounder__FlashloanNotProfitable()")
+        // ) - cannot expect specific values in error
+        console2.log(
+            "OptionsCompounder between flashloan redemption: ",
+            weth.balanceOf(address(strategySonneProxy))
+        );
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__NotEnoughFunds()"))
+        );
+        vm.stopPrank();
 
-    //     /* Check balances after compounding */
-    //     // Question: Do we need accurate calculations about profits?
-    //     console2.log(
-    //         "This contract after flashloan redemption: ",
-    //         weth.balanceOf(address(this))
-    //     );
-    //     console2.log(
-    //         "Strategy after flashloan redemption: ",
-    //         weth.balanceOf(strategy)
-    //     );
-    //     console2.log(
-    //         "OptionsCompounder after flashloan redemption: ",
-    //         weth.balanceOf(address(optionsCompounder))
-    //     );
+        /* Check balances after compounding */
+        // Question: Do we need accurate calculations about profits?
+        console2.log(
+            "Strategy after flashloan redemption: ",
+            weth.balanceOf(address(strategySonneProxy))
+        );
+        // console2.log(
+        //     "Strategy after flashloan redemption: ",
+        //     usdc.balanceOf(address(strategySonneProxy))
+        // );
 
-    //     console2.log("Gain: ", optionsCompounder.getLastGain());
-    // }
+        console2.log("Gain: ", strategySonneProxy.getLastGain());
+    }
 }

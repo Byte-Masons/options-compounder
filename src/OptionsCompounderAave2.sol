@@ -5,9 +5,11 @@ pragma solidity ^0.8.0;
 /* Imports */
 import {console2} from "forge-std/Test.sol";
 import "./interfaces/IOptionsToken.sol";
-import "aave-v2/flashloan/base/FlashLoanReceiverBase.sol";
+import {IFlashLoanReceiver} from "aave-v2/flashloan//interfaces/IFlashLoanReceiver.sol";
+import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
+import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
 import {DiscountExerciseParams} from "./interfaces/IExercise.sol";
-//import "./interfaces/IERC20.sol";
+import "./interfaces/IERC20.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "./helpers/ReaperSwapper.sol";
 import "openzeppelin/access/Ownable.sol";
 
@@ -22,20 +24,24 @@ error OptionsCompounder__FlashloanNotProfitable(
     uint256 fundsAvailable,
     uint256 fundsToPay
 );
+error OptionsCompounder__AssetNotEqualToPaymentToken();
+error OptionsCompounder__NotFinished();
+
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
 /* Main contract */
-contract OptionsCompounder is FlashLoanReceiverBase {
+contract OptionsCompounder is IFlashLoanReceiver {
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
 
     /* Storages */
     IOptionsToken private optionToken;
+    ILendingPoolAddressesProvider private addressProvider;
     ISwapperSwaps private swapperSwaps;
-    uint256 gain = 0;
-
-    bool flashloanFinished = true;
-    mapping(address => uint256) senderToBalance; // storage variable which tracks amount to withdraw by address
+    ILendingPool private lendingPool;
+    address wantToken;
+    bool flashloanFinished;
+    uint256 gain = 0; // TODO: remove at the end
 
     /**
      * List of params which are initiated at the begining:
@@ -43,13 +49,19 @@ contract OptionsCompounder is FlashLoanReceiverBase {
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
      * @param _reaperSwapper - address to contract allowing to swap tokens in easy way
      * */
-    constructor(
+    // TODO: Add initializer !
+    function _OptionsCompounder_Init(
         address _optionToken,
         address _addressProvider,
-        address _reaperSwapper
-    ) FlashLoanReceiverBase(ILendingPoolAddressesProvider(_addressProvider)) {
+        address _reaperSwapper,
+        address _wantToken
+    ) internal {
         optionToken = IOptionsToken(_optionToken);
+        addressProvider = ILendingPoolAddressesProvider(_addressProvider);
+        lendingPool = ILendingPool(addressProvider.getLendingPool());
         swapperSwaps = ISwapperSwaps(_reaperSwapper);
+        wantToken = _wantToken;
+        flashloanFinished = true;
     }
 
     /***************************** Setters ***********************************/
@@ -88,7 +100,7 @@ contract OptionsCompounder is FlashLoanReceiverBase {
             premiums[0],
             params
         );
-
+        flashloanFinished = true;
         return true;
     }
 
@@ -97,8 +109,11 @@ contract OptionsCompounder is FlashLoanReceiverBase {
      * in underlying tokens to want token
      */
     function harvestOTokens(uint256 amount, address option) external {
-        if (false == optionToken.isOption(option)) {
+        if (optionToken.isOption(option) == false) {
             revert OptionsCompounder__NotOption();
+        }
+        if (false == flashloanFinished) {
+            revert OptionsCompounder__NotFinished();
         }
         console2.log(
             "Balance in this contract: ",
@@ -109,7 +124,6 @@ contract OptionsCompounder is FlashLoanReceiverBase {
         address onBehalfOf = address(this);
         uint16 referralCode = 0;
         uint256 initialBalance = paymentToken.balanceOf(address(this));
-        flashloanFinished = false;
 
         address[] memory assets = new address[](1);
         assets[0] = address(paymentToken);
@@ -128,7 +142,7 @@ contract OptionsCompounder is FlashLoanReceiverBase {
             initialBalance
         );
 
-        LENDING_POOL.flashLoan(
+        lendingPool.flashLoan(
             receiverAddress,
             assets,
             amounts,
@@ -137,19 +151,7 @@ contract OptionsCompounder is FlashLoanReceiverBase {
             params,
             referralCode
         );
-    }
-
-    /** @dev Function withdraws all profit for specific sender (based on senderToBalance mapping) */
-    function withdrawProfit(address option) external {
-        uint256 allSendersFunds = senderToBalance[msg.sender];
-        if (allSendersFunds == 0) {
-            revert OptionsCompounder__NotEnoughFunds();
-        }
-        senderToBalance[msg.sender] = 0;
-        /* Get payment tokens again to make sure there is no change between 
-        harvest and excersice */
-        IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
-        IERC20(paymentToken).transfer(msg.sender, allSendersFunds);
+        flashloanFinished = false;
     }
 
     /** @dev private function that helps to execute flashloan and makes it more modular */
@@ -158,18 +160,24 @@ contract OptionsCompounder is FlashLoanReceiverBase {
         uint256 amount,
         uint256 premium,
         bytes calldata params
-    ) internal returns (uint256) {
+    ) private returns (uint256) {
         (
             uint256 optionsAmount,
             address option,
             address sender,
             uint256 initialBalance
         ) = abi.decode(params, (uint256, address, address, uint256));
-        uint256 operationGain = 0;
+
+        uint256 gainInPaymentToken = 0;
+        uint256 gainInWantToken = 0;
         /* Get underlying and payment tokens again to make sure there is no change between 
         harvest and excersice */
         address underlyingToken = optionToken.getUnderlyingToken(option);
         IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
+        /* Asset and paymentToken should be the same addresses */
+        if (asset != address(paymentToken)) {
+            revert OptionsCompounder__AssetNotEqualToPaymentToken();
+        }
         bytes memory exerciseParams = abi.encode(
             DiscountExerciseParams({maxPaymentAmount: amount})
         );
@@ -221,9 +229,10 @@ contract OptionsCompounder is FlashLoanReceiverBase {
             balanceOfUnderlyingToken
         );
         /* Swap underlying token to payment token (asset) */
-        // Question: Now there is an assumption that payment token is the strategy "want" token
-        // If we would like to have different want token, here is the place to querry strategy about it
-        // For the sake of tests it is not yet done
+        // Question: Here is some room for optimization. Instead of swapping all underlying tokens
+        // to payment tokens, we can swap necessary payment tokens (totalAmount) and the rest
+        // underlying tokens can be swapped to the want token but swapper doesn't allow to put
+        // here amountOut (it is amountIn acceptable for swapBal). Is it worth to play with this ?
         swapperSwaps.swapBal(
             underlyingToken,
             asset,
@@ -231,15 +240,23 @@ contract OptionsCompounder is FlashLoanReceiverBase {
             minAmountOutData,
             BEETX_VAULT_OP
         );
+
+        /* Console log area - temporary */
         console2.log(
-            "2.Balance of asset: ",
-            IERC20(asset).balanceOf(address(this))
+            "2.Balance of underlyingToken: ",
+            IERC20(underlyingToken).balanceOf(address(this))
         );
-        /* Asset and paymentToken are the same addresses */
+        console2.log(
+            "2.Balance of wantToken: ",
+            IERC20(wantToken).balanceOf(address(this))
+        );
+        console2.log(
+            "2.Balance of paymentToken: ",
+            paymentToken.balanceOf(address(this))
+        );
+
         /* Repay the debt and revert if it is not profitable */
         uint256 assetBalance = paymentToken.balanceOf(address(this));
-        console2.log("2.Balance of paymentToken: ", assetBalance);
-        console2.log("2.Amount to pay back: ", totalAmount);
 
         if ((assetBalance - initialBalance) <= totalAmount) {
             revert OptionsCompounder__FlashloanNotProfitable(
@@ -248,20 +265,55 @@ contract OptionsCompounder is FlashLoanReceiverBase {
             );
         }
         /* Protected by statement above */
-        operationGain = (assetBalance - initialBalance) - totalAmount;
+        gainInPaymentToken = (assetBalance - initialBalance) - totalAmount;
+
+        /* Approve the underlying token to make swap */
+        IERC20(asset).approve(address(swapperSwaps), gainInPaymentToken);
 
         /* Transfer gain to the sender */
-        IERC20(paymentToken).transfer(sender, operationGain);
+        swapperSwaps.swapBal(
+            asset,
+            wantToken,
+            gainInPaymentToken,
+            minAmountOutData,
+            BEETX_VAULT_OP
+        );
+
+        gainInWantToken = IERC20(wantToken).balanceOf(address(this));
 
         /* Approve lending pool to spend borrowed tokens + premium */
-        IERC20(asset).approve(address(LENDING_POOL), totalAmount);
+        IERC20(asset).approve(address(lendingPool), totalAmount);
 
-        return operationGain;
+        /* Console log area - temporary */
+        console2.log(
+            "3.Balance of underlyingToken: ",
+            IERC20(underlyingToken).balanceOf(address(this))
+        );
+        console2.log("3.Balance of wantToken: ", gainInWantToken);
+        console2.log(
+            "3.Balance of paymentToken: ",
+            paymentToken.balanceOf(address(this))
+        );
+        console2.log("3.Amount paid back: ", totalAmount);
+
+        return gainInWantToken;
     }
 
     /***************************** Getters ***********************************/
     /* Temporary for testing - apy will be caluclated in vault */
     function getLastGain() external view returns (uint256) {
         return gain;
+    }
+
+    function ADDRESSES_PROVIDER()
+        external
+        view
+        returns (ILendingPoolAddressesProvider)
+    {
+        return addressProvider;
+    }
+
+    function LENDING_POOL() external view returns (ILendingPool) {
+        return lendingPool;
     }
 }
