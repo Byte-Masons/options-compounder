@@ -6,6 +6,13 @@ interface IOptionsToken {
         uint256 amount,
         address recipient,
         address option,
+        bytes calldata params
+    ) external returns (bytes memory);
+
+    function exercise(
+        uint256 amount,
+        address recipient,
+        address option,
         bytes calldata params,
         uint256 deadline
     ) external returns (bytes memory);

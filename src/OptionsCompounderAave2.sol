@@ -12,6 +12,8 @@ import {DiscountExerciseParams} from "./interfaces/IExercise.sol";
 import "./interfaces/IERC20.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "./helpers/ReaperSwapper.sol";
 import "openzeppelin/access/Ownable.sol";
+// import "./helpers/UUPSUpgradeable.sol";
+// import "./helpers/Initializable.sol";
 
 /* Errors */
 error OptionsCompounder__NotOption();
@@ -30,6 +32,7 @@ error OptionsCompounder__NotFinished();
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
 /* Main contract */
+// TODO: UUPSUpgradeable ?
 contract OptionsCompounder is IFlashLoanReceiver {
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
@@ -49,13 +52,13 @@ contract OptionsCompounder is IFlashLoanReceiver {
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
      * @param _reaperSwapper - address to contract allowing to swap tokens in easy way
      * */
-    // TODO: Add initializer !
+    // TODO: Add onlyInitializing !
     function _OptionsCompounder_Init(
         address _optionToken,
         address _addressProvider,
         address _reaperSwapper,
         address _wantToken
-    ) internal {
+    ) internal /* onlyInitializing */ {
         optionToken = IOptionsToken(_optionToken);
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         lendingPool = ILendingPool(addressProvider.getLendingPool());
@@ -108,6 +111,7 @@ contract OptionsCompounder is IFlashLoanReceiver {
      * @dev function initiate flashloan in order to exercise option tokens and compound rewards
      * in underlying tokens to want token
      */
+    // TODO: Add access control
     function harvestOTokens(uint256 amount, address option) external {
         if (optionToken.isOption(option) == false) {
             revert OptionsCompounder__NotOption();
@@ -135,12 +139,7 @@ contract OptionsCompounder is IFlashLoanReceiver {
         uint256[] memory modes = new uint256[](2);
         modes[0] = 0;
 
-        bytes memory params = abi.encode(
-            amount,
-            option,
-            msg.sender,
-            initialBalance
-        );
+        bytes memory params = abi.encode(amount, option, initialBalance);
 
         lendingPool.flashLoan(
             receiverAddress,
@@ -161,12 +160,8 @@ contract OptionsCompounder is IFlashLoanReceiver {
         uint256 premium,
         bytes calldata params
     ) private returns (uint256) {
-        (
-            uint256 optionsAmount,
-            address option,
-            address sender,
-            uint256 initialBalance
-        ) = abi.decode(params, (uint256, address, address, uint256));
+        (uint256 optionsAmount, address option, uint256 initialBalance) = abi
+            .decode(params, (uint256, address, uint256));
 
         uint256 gainInPaymentToken = 0;
         uint256 gainInWantToken = 0;
@@ -198,9 +193,8 @@ contract OptionsCompounder is IFlashLoanReceiver {
             optionsAmount,
             address(this),
             option,
-            exerciseParams,
-            block.timestamp + 10
-        ); //Temporary magic number
+            exerciseParams
+        );
 
         // temporary logs
         console2.log(
@@ -220,7 +214,7 @@ contract OptionsCompounder is IFlashLoanReceiver {
         uint256 totalAmount = amount + premium;
         MinAmountOutData memory minAmountOutData = MinAmountOutData(
             MinAmountOutKind.Absolute,
-            0 // temporar 0
+            0 // could use the oracle to set a min price from the options token
         );
 
         /* Approve the underlying token to make swap */
@@ -230,7 +224,7 @@ contract OptionsCompounder is IFlashLoanReceiver {
         );
         /* Swap underlying token to payment token (asset) */
         // Question: Here is some room for optimization. Instead of swapping all underlying tokens
-        // to payment tokens, we can swap necessary payment tokens (totalAmount) and the rest
+        // to payment tokens, we can swap necessary amount of payment tokens (totalAmount) and the rest
         // underlying tokens can be swapped to the want token but swapper doesn't allow to put
         // here amountOut (it is amountIn acceptable for swapBal). Is it worth to play with this ?
         swapperSwaps.swapBal(
