@@ -80,11 +80,13 @@ contract ReaperStrategySonne is
             _multisigRoles,
             _keepers
         );
-        _OptionsCompounder_Init(
+        // Question: Should be nested deeper ?
+        __OptionsCompounder_Init(
             _optionToken,
             _addressProvider,
             _swapper,
-            cWant.underlying()
+            cWant.underlying(),
+            _multisigRoles
         );
         markets = [_cWant];
         comptroller = IComptroller(cWant.comptroller());

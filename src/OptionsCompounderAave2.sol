@@ -13,7 +13,8 @@ import "./interfaces/IERC20.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "./helpers/ReaperSwapper.sol";
 import "openzeppelin/access/Ownable.sol";
 // import "./helpers/UUPSUpgradeable.sol";
-// import "./helpers/Initializable.sol";
+import "./helpers/AccessControlEnumerableUpgradeable.sol";
+import {ReaperAccessControl} from "./helpers/ReaperAccessControl.sol";
 
 /* Errors */
 error OptionsCompounder__NotOption();
@@ -28,12 +29,15 @@ error OptionsCompounder__FlashloanNotProfitable(
 );
 error OptionsCompounder__AssetNotEqualToPaymentToken();
 error OptionsCompounder__NotFinished();
+error OptionsCompounder__OnlyThreeRolesAllowed();
 
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
 /* Main contract */
-// TODO: UUPSUpgradeable ?
-contract OptionsCompounder is IFlashLoanReceiver {
+contract OptionsCompounder is
+    IFlashLoanReceiver,
+    AccessControlEnumerableUpgradeable
+{
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
 
@@ -52,30 +56,38 @@ contract OptionsCompounder is IFlashLoanReceiver {
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
      * @param _reaperSwapper - address to contract allowing to swap tokens in easy way
      * */
-    // TODO: Add onlyInitializing !
-    function _OptionsCompounder_Init(
+    function __OptionsCompounder_Init(
         address _optionToken,
         address _addressProvider,
         address _reaperSwapper,
-        address _wantToken
-    ) internal /* onlyInitializing */ {
+        address _wantToken,
+        address[] memory _multisigRoles
+    ) internal onlyInitializing {
         optionToken = IOptionsToken(_optionToken);
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         lendingPool = ILendingPool(addressProvider.getLendingPool());
         swapperSwaps = ISwapperSwaps(_reaperSwapper);
         wantToken = _wantToken;
         flashloanFinished = true;
+        if (_multisigRoles.length != 3) {
+            revert OptionsCompounder__OnlyThreeRolesAllowed();
+        }
+        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[0]);
+        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[1]);
+        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[2]);
     }
 
     /***************************** Setters ***********************************/
     /* Only owner functions - in the future multi level access control*/
-    /* TODO: Access control to add ! */
-    function setSwapper(address _swapper) external {
+    function setSwapper(
+        address _swapper
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         swapperSwaps = ISwapperSwaps(_swapper);
     }
 
-    /* TODO: Access control to add ! */
-    function setOptionToken(address _optionToken) external {
+    function setOptionToken(
+        address _optionToken
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         optionToken = IOptionsToken(_optionToken);
     }
 
@@ -111,12 +123,14 @@ contract OptionsCompounder is IFlashLoanReceiver {
      * @dev function initiate flashloan in order to exercise option tokens and compound rewards
      * in underlying tokens to want token
      */
-    // TODO: Add access control
+    // TODO: Add access control.
+    // Question: Will it be called by the strategy via "harvest" function (so internal func) or
+    // we need heere access control like atLeastRole(KEEPER) ?
     function harvestOTokens(uint256 amount, address option) external {
         if (optionToken.isOption(option) == false) {
             revert OptionsCompounder__NotOption();
         }
-        if (false == flashloanFinished) {
+        if (flashloanFinished == false) {
             revert OptionsCompounder__NotFinished();
         }
         console2.log(
@@ -249,7 +263,7 @@ contract OptionsCompounder is IFlashLoanReceiver {
             paymentToken.balanceOf(address(this))
         );
 
-        /* Repay the debt and revert if it is not profitable */
+        /* Calculate profit and revert if it is not profitable */
         uint256 assetBalance = paymentToken.balanceOf(address(this));
 
         if ((assetBalance - initialBalance) <= totalAmount) {
@@ -264,14 +278,16 @@ contract OptionsCompounder is IFlashLoanReceiver {
         /* Approve the underlying token to make swap */
         IERC20(asset).approve(address(swapperSwaps), gainInPaymentToken);
 
-        /* Transfer gain to the sender */
-        swapperSwaps.swapBal(
-            asset,
-            wantToken,
-            gainInPaymentToken,
-            minAmountOutData,
-            BEETX_VAULT_OP
-        );
+        /* Get strategies want token */
+        if (wantToken != asset) {
+            swapperSwaps.swapBal(
+                asset,
+                wantToken,
+                gainInPaymentToken,
+                minAmountOutData,
+                BEETX_VAULT_OP
+            );
+        }
 
         gainInWantToken = IERC20(wantToken).balanceOf(address(this));
 
@@ -294,7 +310,7 @@ contract OptionsCompounder is IFlashLoanReceiver {
     }
 
     /***************************** Getters ***********************************/
-    /* Temporary for testing - apy will be caluclated in vault */
+    /* Temporary for testing */
     function getLastGain() external view returns (uint256) {
         return gain;
     }
@@ -310,4 +326,30 @@ contract OptionsCompounder is IFlashLoanReceiver {
     function LENDING_POOL() external view returns (ILendingPool) {
         return lendingPool;
     }
+
+    // Question: Shall we use reaper access control somehow in this contract ?
+    // /**
+    //  * @dev Returns an array of all the relevant roles arranged in descending order of privilege.
+    //  *      Subclasses should override this to specify their unique roles arranged in the correct
+    //  *      order, for example, [SUPER-ADMIN, ADMIN, GUARDIAN, STRATEGIST].
+    //  */
+    // function _cascadingAccessRoles()
+    //     internal
+    //     pure
+    //     override
+    //     returns (bytes32[] memory)
+    // {
+    //     bytes32[] memory cascadingAccessRoles = new bytes32[](5);
+    //     cascadingAccessRoles[0] = DEFAULT_ADMIN_ROLE;
+    //     cascadingAccessRoles[1] = ADMIN;
+    //     cascadingAccessRoles[2] = GUARDIAN;
+    //     return cascadingAccessRoles;
+    // }
+
+    // function _hasRole(
+    //     bytes32 _role,
+    //     address _account
+    // ) internal view override returns (bool) {
+    //     return hasRole(_role, _account);
+    // }
 }
