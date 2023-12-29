@@ -84,8 +84,6 @@ contract ReaperStrategySonne is
         __OptionsCompounder_init(
             _optionToken,
             _addressProvider,
-            _swapper,
-            cWant.underlying(),
             _multisigRoles
         );
         markets = [_cWant];
@@ -607,5 +605,13 @@ contract ReaperStrategySonne is
     modifier doUpdateBalance() {
         _;
         updateBalance();
+    }
+
+    function wantToken() public view virtual override returns (address) {
+        return want;
+    }
+
+    function swapperSwaps() public view virtual override returns (address) {
+        return address(swapper);
     }
 }

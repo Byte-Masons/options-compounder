@@ -44,7 +44,7 @@ contract OptionsTokenTest is Test {
     uint256 constant AMOUNT = 1e18;
 
     /* Variables */
-    IERC20 weth = IERC20(WETH);
+    ERC20 weth = ERC20(WETH);
     IERC20 oath = IERC20(OATH);
     CErc20I cusdc = CErc20I(CUSDC);
     IERC20 paymentToken;
@@ -270,7 +270,6 @@ contract OptionsTokenTest is Test {
         //     ' is missing role ',
         //     Strings.toHexString(uint256(role), 32)
         //   )
-        strategySonneProxy.setSwapper(hackersStrategy);
         vm.expectRevert();
         strategySonneProxy.setOptionToken(hackersStrategy);
         vm.stopPrank();

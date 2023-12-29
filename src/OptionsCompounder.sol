@@ -18,37 +18,37 @@ import "oz-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
 
 // import "./helpers/UUPSUpgradeable.sol";
 
-/* Errors */
-error OptionsCompounder__NotOption();
-error OptionsCompounder__TooMuchAssetsLoaned();
-error OptionsCompounder__NotEnoughFunds();
-error OptionsCompounder__NotAStrategy();
-error OptionsCompounder__StrategyNotFound();
-error OptionsCompounder__StrategyAlreadyExists();
-error OptionsCompounder__FlashloanNotProfitable(
-    uint256 fundsAvailable,
-    uint256 fundsToPay
-);
-error OptionsCompounder__AssetNotEqualToPaymentToken();
-error OptionsCompounder__NotFinished();
-error OptionsCompounder__OnlyThreeRolesAllowed();
-
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
 /* Main contract */
-contract OptionsCompounder is
+abstract contract OptionsCompounder is
     IFlashLoanReceiver,
     AccessControlEnumerableUpgradeable
 {
+    /* Errors */
+    error OptionsCompounder__NotOption();
+    error OptionsCompounder__TooMuchAssetsLoaned();
+    error OptionsCompounder__NotEnoughFunds();
+    error OptionsCompounder__NotAStrategy();
+    error OptionsCompounder__StrategyNotFound();
+    error OptionsCompounder__StrategyAlreadyExists();
+    error OptionsCompounder__FlashloanNotProfitable(
+        uint256 fundsAvailable,
+        uint256 fundsToPay
+    );
+    error OptionsCompounder__AssetNotEqualToPaymentToken();
+    error OptionsCompounder__NotFinished();
+    error OptionsCompounder__OnlyThreeRolesAllowed();
+
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
 
     /* Storages */
     IOptionsToken private optionToken;
     ILendingPoolAddressesProvider private addressProvider;
-    ISwapperSwaps private swapperSwaps;
+    // ISwapperSwaps private swapperSwaps;
     ILendingPool private lendingPool;
-    address wantToken;
+    //address wantToken;
     bool flashloanFinished;
     uint256 gain = 0; // TODO: remove at the end
 
@@ -62,20 +62,17 @@ contract OptionsCompounder is
      * List of params which are initiated at the begining:
      * @param _optionToken - option token address which allows to redeem underlying token via operation "exercise"
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
-     * @param _reaperSwapper - address to contract allowing to swap tokens in easy way
      * */
     function __OptionsCompounder_init(
         address _optionToken,
         address _addressProvider,
-        address _reaperSwapper,
-        address _wantToken,
         address[] memory _multisigRoles
     ) internal onlyInitializing {
         optionToken = IOptionsToken(_optionToken);
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         lendingPool = ILendingPool(addressProvider.getLendingPool());
-        swapperSwaps = ISwapperSwaps(_reaperSwapper);
-        wantToken = _wantToken;
+        // swapperSwaps = ISwapperSwaps(_reaperSwapper);
+        //wantToken = _wantToken;
         flashloanFinished = true;
         if (_multisigRoles.length != 3) {
             revert OptionsCompounder__OnlyThreeRolesAllowed();
@@ -87,12 +84,6 @@ contract OptionsCompounder is
 
     /***************************** Setters ***********************************/
     /* Only owner functions - in the future multi level access control*/
-    function setSwapper(
-        address _swapper
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        swapperSwaps = ISwapperSwaps(_swapper);
-    }
-
     function setOptionToken(
         address _optionToken
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -247,16 +238,13 @@ contract OptionsCompounder is
         );
 
         /* Approve the underlying token to make swap */
-        underlyingToken.approve(
-            address(swapperSwaps),
-            balanceOfUnderlyingToken
-        );
+        underlyingToken.approve(swapperSwaps(), balanceOfUnderlyingToken);
         /* Swap underlying token to payment token (asset) */
         // Question: Here is some room for optimization. Instead of swapping all underlying tokens
         // to payment tokens, we can swap necessary amount of payment tokens (totalAmount) and the rest
         // underlying tokens can be swapped to the want token but swapper doesn't allow to put
         // here amountOut (it is amountIn acceptable for swapBal). Is it worth to play with this ?
-        swapperSwaps.swapBal(
+        ISwapperSwaps(swapperSwaps()).swapBal(
             address(underlyingToken),
             asset,
             balanceOfUnderlyingToken,
@@ -271,7 +259,7 @@ contract OptionsCompounder is
         );
         console2.log(
             "2.Balance of wantToken: ",
-            IERC20(wantToken).balanceOf(address(this))
+            IERC20(wantToken()).balanceOf(address(this))
         );
         console2.log(
             "2.Balance of paymentToken: ",
@@ -291,20 +279,20 @@ contract OptionsCompounder is
         gainInPaymentToken = (assetBalance - initialBalance) - totalAmount;
 
         /* Approve the underlying token to make swap */
-        IERC20(asset).approve(address(swapperSwaps), gainInPaymentToken);
+        IERC20(asset).approve(swapperSwaps(), gainInPaymentToken);
 
         /* Get strategies want token */
-        if (wantToken != asset) {
-            swapperSwaps.swapBal(
+        if (wantToken() != asset) {
+            ISwapperSwaps(swapperSwaps()).swapBal(
                 asset,
-                wantToken,
+                wantToken(),
                 gainInPaymentToken,
                 minAmountOutData,
                 BEETX_VAULT_OP
             );
         }
 
-        gainInWantToken = IERC20(wantToken).balanceOf(address(this));
+        gainInWantToken = IERC20(wantToken()).balanceOf(address(this));
 
         /* Approve lending pool to spend borrowed tokens + premium */
         IERC20(asset).approve(address(lendingPool), totalAmount);
@@ -341,6 +329,10 @@ contract OptionsCompounder is
     function LENDING_POOL() external view returns (ILendingPool) {
         return lendingPool;
     }
+
+    function wantToken() public view virtual returns (address);
+
+    function swapperSwaps() public view virtual returns (address);
 
     // Question: Shall we use reaper access control somehow in this contract ?
     // /**
