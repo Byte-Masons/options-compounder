@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.13;
 
-import {console2} from "forge-std/Test.sol";
-
 import {Owned} from "solmate/auth/Owned.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
+import {SafeERC20, IERC20} from "oz/token/ERC20/utils/SafeERC20.sol";
 
-import {BaseExercise, DiscountExerciseParams, DiscountExerciseReturnData} from "../exercise/BaseExercise.sol";
-import {IOracle} from "../interfaces/IOracle.sol";
-import {IERC20Mintable} from "../interfaces/IERC20Mintable.sol";
+import {BaseExercise} from "../exercise/BaseExercise.sol";
+import {IOracle} from "../../../src/interfaces/IOracle.sol";
 import {OptionsToken} from "../OptionsToken.sol";
-import {IERC20} from "../interfaces/IERC20.sol";
+
+struct DiscountExerciseParams {
+    uint256 maxPaymentAmount;
+    uint256 deadline;
+}
 
 /// @title Options Token Exercise Contract
 /// @author @bigbadbeard, @lookee, @eidolon
@@ -23,10 +25,12 @@ contract DiscountExercise is BaseExercise, Owned {
     /// Library usage
     using SafeTransferLib for ERC20;
     using SafeTransferLib for IERC20;
+    using SafeERC20 for IERC20;
     using FixedPointMathLib for uint256;
 
     /// Errors
     error Exercise__SlippageTooHigh();
+    error Exercise__PastDeadline();
 
     /// Events
     event Exercised(
@@ -37,6 +41,13 @@ contract DiscountExercise is BaseExercise, Owned {
     );
     event SetOracle(IOracle indexed newOracle);
     event SetTreasury(address indexed newTreasury);
+    event SetMultiplier(uint256 indexed newMultiplier);
+
+    /// Constants
+
+    /// @notice The denominator for converting the multiplier into a decimal number.
+    /// i.e. multiplier uses 4 decimals.
+    uint256 internal constant MULTIPLIER_DENOM = 10000;
 
     /// Immutable parameters
 
@@ -44,7 +55,7 @@ contract DiscountExercise is BaseExercise, Owned {
     IERC20 public immutable paymentToken;
 
     /// @notice The underlying token purchased during redemption
-    IERC20Mintable public immutable underlyingToken;
+    ERC20 public immutable underlyingToken;
 
     /// Storage variables
 
@@ -52,24 +63,31 @@ contract DiscountExercise is BaseExercise, Owned {
     /// the underlying token while exercising options (the strike price)
     IOracle public oracle;
 
+    /// @notice The multiplier applied to the TWAP value. Encodes the discount of
+    /// the options token. Uses 4 decimals.
+    uint256 public multiplier;
+
     /// @notice The treasury address which receives tokens paid during redemption
     address public treasury;
 
     constructor(
         OptionsToken oToken_,
         address owner_,
-        ERC20 paymentToken_,
-        IERC20Mintable underlyingToken_,
+        IERC20 paymentToken_,
+        ERC20 underlyingToken_,
         IOracle oracle_,
+        uint256 multiplier_,
         address treasury_
     ) BaseExercise(oToken_) Owned(owner_) {
         paymentToken = paymentToken_;
         underlyingToken = underlyingToken_;
         oracle = oracle_;
+        multiplier = multiplier_;
         treasury = treasury_;
 
         emit SetOracle(oracle_);
         emit SetTreasury(treasury_);
+        emit SetMultiplier(multiplier_);
     }
 
     /// External functions
@@ -85,7 +103,13 @@ contract DiscountExercise is BaseExercise, Owned {
         uint256 amount,
         address recipient,
         bytes memory params
-    ) external virtual override onlyOToken returns (bytes memory data) {
+    )
+        external
+        virtual
+        override
+        onlyOToken
+        returns (uint paymentAmount, address, uint256, uint256)
+    {
         return _exercise(from, amount, recipient, params);
     }
 
@@ -96,14 +120,6 @@ contract DiscountExercise is BaseExercise, Owned {
         return paymentAmount;
     }
 
-    function getUnderlyingToken() external view override returns (address) {
-        return address(underlyingToken);
-    }
-
-    function getPaymentToken() external view override returns (address) {
-        return address(paymentToken);
-    }
-
     /// Owner functions
 
     /// @notice Sets the oracle contract. Only callable by the owner.
@@ -111,6 +127,13 @@ contract DiscountExercise is BaseExercise, Owned {
     function setOracle(IOracle oracle_) external onlyOwner {
         oracle = oracle_;
         emit SetOracle(oracle_);
+    }
+
+    /// @notice Sets the discount multiplier.
+    /// @param multiplier_ The new multiplier
+    function setMultiplier(uint256 multiplier_) external onlyOwner {
+        multiplier = multiplier_;
+        emit SetMultiplier(multiplier_);
     }
 
     /// @notice Sets the treasury address. Only callable by the owner.
@@ -127,25 +150,33 @@ contract DiscountExercise is BaseExercise, Owned {
         uint256 amount,
         address recipient,
         bytes memory params
-    ) internal virtual returns (bytes memory data) {
+    )
+        internal
+        virtual
+        returns (uint256 paymentAmount, address, uint256, uint256)
+    {
         // decode params
         DiscountExerciseParams memory _params = abi.decode(
             params,
             (DiscountExerciseParams)
         );
+
+        if (block.timestamp > _params.deadline) revert Exercise__PastDeadline();
+
+        // apply multiplier to price
+        uint256 price = oracle.getPrice().mulDivUp(
+            multiplier,
+            MULTIPLIER_DENOM
+        );
         // transfer payment tokens from user to the treasury
-        uint256 paymentAmount = amount.mulWadUp(oracle.getPrice());
+        // this price includes the discount
+        paymentAmount = amount.mulWadUp(price);
         if (paymentAmount > _params.maxPaymentAmount)
             revert Exercise__SlippageTooHigh();
-        console2.log("After calcs ", msg.sender, from, paymentAmount);
-        paymentToken.transferFrom(from, treasury, paymentAmount);
+        paymentToken.safeTransferFrom(from, treasury, paymentAmount);
 
-        // mint underlying tokens to recipient
-        underlyingToken.mint(recipient, amount);
-
-        data = abi.encode(
-            DiscountExerciseReturnData({paymentAmount: paymentAmount})
-        );
+        // transfer underlying tokens to recipient
+        underlyingToken.safeTransfer(recipient, amount);
 
         emit Exercised(from, recipient, amount, paymentAmount);
     }

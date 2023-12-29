@@ -5,27 +5,27 @@ import {console2} from "forge-std/Test.sol";
 import {Owned} from "solmate/auth/Owned.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 
-import {IOracle} from "./interfaces/IOracle.sol";
-import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
-import {IExercise} from "./interfaces/IExercise.sol";
+import {IOptionsToken} from "../../src/interfaces/IOptionsToken.sol";
+import {IOracle} from "../../src/interfaces/IOracle.sol";
 
-struct Option {
-    address impl;
-    bool isActive;
+import {IExercise} from "../../src/interfaces/IExercise.sol";
+
+struct OptionStruct {
+    uint256 paymentAmount;
 }
 
 /// @title Options Token
 /// @author zefram.eth
 /// @notice Options token representing the right to perform an advantageous action,
 /// such as purchasing the underlying token at a discount to the market price.
-contract OptionsToken is ERC20, Owned, IERC20Mintable {
+contract OptionsToken is IOptionsToken, ERC20, Owned {
     /// -----------------------------------------------------------------------
     /// Errors
     /// -----------------------------------------------------------------------
 
-    error OptionsToken__PastDeadline();
     error OptionsToken__NotTokenAdmin();
-    error OptionsToken__NotActive();
+    error OptionsToken__NotExerciseContract();
+    error Upgradeable__Unauthorized();
 
     /// -----------------------------------------------------------------------
     /// Events
@@ -35,23 +35,28 @@ contract OptionsToken is ERC20, Owned, IERC20Mintable {
         address indexed sender,
         address indexed recipient,
         uint256 amount,
-        bytes parameters
+        address data0,
+        uint256 data1,
+        uint256 data2
     );
     event SetOracle(IOracle indexed newOracle);
     event SetTreasury(address indexed newTreasury);
+    event SetExerciseContract(address indexed _address, bool _isExercise);
 
     /// -----------------------------------------------------------------------
     /// Immutable parameters
     /// -----------------------------------------------------------------------
 
+    uint256 public constant UPGRADE_TIMELOCK = 48 hours;
+    uint256 public constant FUTURE_NEXT_PROPOSAL_TIME = 365 days * 100;
     /// @notice The contract that has the right to mint options tokens
     address public immutable tokenAdmin;
+
+    mapping(address => bool) public isExerciseContract;
 
     /// -----------------------------------------------------------------------
     /// Storage variables
     /// -----------------------------------------------------------------------
-
-    Option[] public options;
 
     /// -----------------------------------------------------------------------
     /// Constructor
@@ -101,40 +106,42 @@ contract OptionsToken is ERC20, Owned, IERC20Mintable {
     function exercise(
         uint256 amount,
         address recipient,
-        uint256 optionId,
+        address option,
         bytes calldata params
-    ) external virtual returns (bytes memory) {
-        return _exercise(amount, recipient, optionId, params);
-    }
-
-    /// @notice Exercises options tokens, giving the reward to the recipient.
-    /// @dev WARNING: If `amount` is zero, the bytes returned will be empty and therefore, not decodable.
-    /// @dev The options tokens are not burnt but sent to address(0) to avoid messing up the
-    /// inflation schedule.
-    /// @param amount The amount of options tokens to exercise
-    /// @param recipient The recipient of the reward
-    /// @param params Extra parameters to be used by the exercise function
-    /// @param deadline The deadline by which the transaction must be mined
-    function exercise(
-        uint256 amount,
-        address recipient,
-        uint256 optionId,
-        bytes calldata params,
-        uint256 deadline
-    ) external virtual returns (bytes memory) {
-        if (block.timestamp > deadline) revert OptionsToken__PastDeadline();
-        return _exercise(amount, recipient, optionId, params);
+    )
+        external
+        virtual
+        returns (
+            uint256 paymentAmount,
+            address,
+            uint256,
+            uint256 // misc data
+        )
+    {
+        return _exercise(amount, recipient, option, params);
     }
 
     /// -----------------------------------------------------------------------
     /// Owner functions
     /// -----------------------------------------------------------------------
 
+    function getPaymentAmount(
+        uint256 amount,
+        address option
+    ) external view returns (uint256 paymentAmount) {
+        paymentAmount = IExercise(option).getPaymentAmount(amount);
+        return paymentAmount;
+    }
+
     /// @notice Adds a new Exercise contract to the available options.
     /// @param _address Address of the Exercise contract, that implements BaseExercise.
-    /// @param _isOption Whether oToken holders should be allowed to exercise using this option.
-    function setOption(address _address, bool _isOption) external onlyOwner {
-        isOption[_address] = _isOption;
+    /// @param _isExercise Whether oToken holders should be allowed to exercise using this option.
+    function setExerciseContract(
+        address _address,
+        bool _isExercise
+    ) external onlyOwner {
+        isExerciseContract[_address] = _isExercise;
+        emit SetExerciseContract(_address, _isExercise);
     }
 
     /// -----------------------------------------------------------------------
@@ -144,31 +151,38 @@ contract OptionsToken is ERC20, Owned, IERC20Mintable {
     function _exercise(
         uint256 amount,
         address recipient,
-        uint256 optionId,
+        address option,
         bytes calldata params
-    ) internal virtual returns (bytes memory data) {
+    )
+        internal
+        virtual
+        returns (
+            uint256 paymentAmount,
+            address data0,
+            uint256 data1,
+            uint256 data2 // misc data
+        )
+    {
         // skip if amount is zero
-        if (amount == 0) return new bytes(0);
-
-        // get option
-        Option memory option = options[optionId];
+        if (amount == 0) return (0, address(0), 0, 0);
 
         // skip if option is not active
-        if (!option.isActive) revert OptionsToken__NotActive();
-
+        if (!isExerciseContract[option])
+            revert OptionsToken__NotExerciseContract();
         // transfer options tokens from msg.sender to address(0)
         // we transfer instead of burn because TokenAdmin cares about totalSupply
         // which we don't want to change in order to follow the emission schedule
-        transfer(address(0), amount);
+        transfer(address(0x1), amount);
 
         // give rewards to recipient
-        data = IExercise(option.impl).exercise(
+        (paymentAmount, data0, data1, data2) = IExercise(option).exercise(
             msg.sender,
             amount,
             recipient,
             params
         );
 
-        emit Exercise(msg.sender, recipient, amount, params);
+        // emit event
+        emit Exercise(msg.sender, recipient, amount, data0, data1, data2);
     }
 }
