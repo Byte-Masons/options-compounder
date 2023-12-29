@@ -5,19 +5,18 @@ import "forge-std/Test.sol";
 
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
-import {IERC20} from "../src/interfaces/IERC20.sol";
 import {ReaperStrategySonne} from "../src/ReaperStrategySonne.sol";
-import {ReaperStrategySonneV2} from "../src/ReaperStrategySonneV2.sol";
-import {StrategyProxy} from "../src/StrategyProxy.sol";
-import {BEETX_VAULT_OP} from "../src/OptionsCompounderAave2.sol";
-import {OptionsToken, OptionStruct} from "../src/OptionsToken.sol";
+import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
+import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
+import {IERC20} from "../src/interfaces/IERC20.sol";
+import {OptionsToken, OptionStruct} from "./mocks/OptionsToken.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "../src/helpers/ReaperSwapper.sol";
 import {DiscountExerciseParams, DiscountExerciseReturnData, DiscountExercise} from "../src/exercise/DiscountExercise.sol";
 import {TestERC20} from "./mocks/TestERC20.sol";
 import {BalancerOracle} from "../src/oracles/BalancerOracle.sol";
 import {MockBalancerTwapOracle} from "./mocks/MockBalancerTwapOracle.sol";
-import {Helper} from "../src/helpers/HelperFunctions.sol";
-import {CErc20I} from "../src/helpers/CErc20I.sol";
+import {Helper} from "./mocks/HelperFunctions.sol";
+import {CErc20I} from "../src/interfaces/CErc20I.sol";
 
 //import "./Strings.sol";
 
@@ -70,7 +69,7 @@ contract OptionsTokenTest is Test {
     MockBalancerTwapOracle balancerTwapOracle;
     ReaperStrategySonneV2 strategySonnev2;
     ReaperStrategySonne strategySonne;
-    StrategyProxy strategyProxy;
+    ERC1967Proxy strategyProxy;
     ReaperStrategySonne strategySonneProxy;
 
     ReaperSwapper reaperSwapper;
@@ -186,7 +185,7 @@ contract OptionsTokenTest is Test {
         console2.log("Deployment contract");
         strategySonne = new ReaperStrategySonne();
         console2.log("Deployment strategy proxy");
-        strategyProxy = new StrategyProxy(address(strategySonne), "");
+        strategyProxy = new ERC1967Proxy(address(strategySonne), "");
         console2.log("Initialization proxied sonne strategy");
         strategySonneProxy = ReaperStrategySonne(address(strategyProxy));
         strategySonneProxy.initialize(

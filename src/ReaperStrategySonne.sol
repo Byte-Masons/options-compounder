@@ -2,17 +2,19 @@
 
 pragma solidity ^0.8.0;
 
-import {ReaperBaseStrategyv4} from "./helpers/ReaperBaseStrategyv4.sol";
-import {IVault} from "./interfaces/IVault.sol";
-import {CErc20I} from "./helpers/CErc20I.sol";
-import {CTokenI} from "./helpers/CTokenI.sol";
+import {ILeverageable} from "vault-v2/interfaces/ILeverageable.sol";
+import {ReaperBaseStrategyv4} from "vault-v2/ReaperBaseStrategyv4.sol";
+import {IVault} from "vault-v2/interfaces/IVault.sol";
+import {ReaperMathUtils} from "vault-v2/libraries/ReaperMathUtils.sol";
+import {CErc20I} from "./interfaces/CErc20I.sol";
+import {CTokenI} from "./interfaces/CTokenI.sol";
 import {IComptroller} from "./interfaces/IComptroller.sol";
-import {ILeverageable} from "./interfaces/ILeverageable.sol";
+
 import {SafeERC20Upgradeable} from "./helpers/SafeERC20Upgradeable.sol";
 import {IERC20Upgradeable} from "./interfaces/IERC20Upgradeable.sol";
 import {MathUpgradeable} from "./helpers/MathUpgradeable.sol";
-import {ReaperMathUtils} from "./helpers/ReaperMathUtils.sol";
-import {OptionsCompounder} from "./OptionsCompounderAave2.sol";
+
+import {OptionsCompounder} from "./OptionsCompounder.sol";
 
 /**
  * @dev This strategy will deposit a token on Sonne to maximize yield

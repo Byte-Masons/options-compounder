@@ -5,10 +5,10 @@ import {console2} from "forge-std/Test.sol";
 import {Owned} from "solmate/auth/Owned.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 
-import {IOptionsToken} from "./interfaces/IOptionsToken.sol";
-import {IOracle} from "./interfaces/IOracle.sol";
-import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
-import {IExercise} from "./interfaces/IExercise.sol";
+import {IOptionsToken} from "../../src/interfaces/IOptionsToken.sol";
+import {IOracle} from "../../src/interfaces/IOracle.sol";
+import {IERC20Mintable} from "../../src/interfaces/IERC20Mintable.sol";
+import {IExercise} from "../../src/interfaces/IExercise.sol";
 
 struct OptionStruct {
     uint256 paymentAmount;
