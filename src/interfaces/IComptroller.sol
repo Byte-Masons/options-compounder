@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.0;
 
-import "../helpers/CTokenI.sol";
+import "./CTokenI.sol";
 
 interface IComptroller {
     function compAccrued(address user) external view returns (uint256 amount);

@@ -3,22 +3,22 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 
-import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
 import {ReaperStrategySonne} from "../src/ReaperStrategySonne.sol";
-import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
-import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
-import {IERC20} from "../src/interfaces/IERC20.sol";
-import {OptionsToken, OptionStruct} from "./mocks/OptionsToken.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "../src/helpers/ReaperSwapper.sol";
-import {DiscountExerciseParams, DiscountExerciseReturnData, DiscountExercise} from "../src/exercise/DiscountExercise.sol";
-import {TestERC20} from "./mocks/TestERC20.sol";
 import {BalancerOracle} from "../src/oracles/BalancerOracle.sol";
+import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
+import {CErc20I} from "../src/interfaces/CErc20I.sol";
+import {OptionsToken, OptionStruct} from "./mocks/OptionsToken.sol";
+import {DiscountExerciseParams, DiscountExerciseReturnData, DiscountExercise} from "./mocks/exercise/DiscountExercise.sol";
 import {MockBalancerTwapOracle} from "./mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
-import {CErc20I} from "../src/interfaces/CErc20I.sol";
+import {TestERC20} from "./mocks/TestERC20.sol";
+import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
+import {ERC20} from "solmate/tokens/ERC20.sol";
+import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
+import {IERC20} from "oz/token/ERC20/IERC20.sol";
 
-//import "./Strings.sol";
+// import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
+import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "../src/helpers/ReaperSwapper.sol";
 
 contract OptionsTokenTest is Test {
     using FixedPointMathLib for uint256;
@@ -67,11 +67,11 @@ contract OptionsTokenTest is Test {
     DiscountExercise exerciser;
     BalancerOracle oracle;
     MockBalancerTwapOracle balancerTwapOracle;
-    ReaperStrategySonneV2 strategySonnev2;
     ReaperStrategySonne strategySonne;
     ERC1967Proxy strategyProxy;
     ReaperStrategySonne strategySonneProxy;
-
+    ERC1967Proxy reaperProxy;
+    ReaperSwapper reaperSwapperProxy;
     ReaperSwapper reaperSwapper;
     Helper helper;
 
@@ -129,24 +129,32 @@ contract OptionsTokenTest is Test {
         helper = new Helper();
 
         /* Reaper deployment and configuration */
-        reaperSwapper = new ReaperSwapper(
+        reaperSwapperProxy = new ReaperSwapper(
             strategists,
             address(this),
             address(this)
         );
-        reaperSwapper.updateBalSwapPoolID(
+        // reaperSwapper = new ReaperSwapper();
+        // reaperProxy = new ERC1967Proxy(address(reaperSwapper), "");
+        // reaperSwapperProxy = ReaperSwapper(address(reaperSwapperProxy));
+        // reaperSwapperProxy.initialize(
+        // strategists,
+        // address(this),
+        // address(this)
+        // );
+        reaperSwapperProxy.updateBalSwapPoolID(
             address(weth),
             address(oath),
             beetxVault,
             OATHV1_ETH_BPT
         );
-        reaperSwapper.updateBalSwapPoolID(
+        reaperSwapperProxy.updateBalSwapPoolID(
             address(oath),
             address(weth),
             beetxVault,
             OATHV1_ETH_BPT
         );
-        reaperSwapper.updateBalSwapPoolID(
+        reaperSwapperProxy.updateBalSwapPoolID(
             address(weth),
             cusdc.underlying(),
             beetxVault,
@@ -190,7 +198,7 @@ contract OptionsTokenTest is Test {
         strategySonneProxy = ReaperStrategySonne(address(strategyProxy));
         strategySonneProxy.initialize(
             vault,
-            address(reaperSwapper),
+            address(reaperSwapperProxy),
             strategists,
             multisigRoles,
             keepers,
@@ -208,8 +216,8 @@ contract OptionsTokenTest is Test {
             MinAmountOutKind.Absolute,
             0
         );
-        weth.approve(address(reaperSwapper), AMOUNT);
-        reaperSwapper.swapBal(
+        weth.approve(address(reaperSwapperProxy), AMOUNT);
+        reaperSwapperProxy.swapBal(
             address(weth),
             address(underlyingToken),
             AMOUNT,

@@ -10,11 +10,11 @@ import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddr
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
 import {DiscountExerciseParams} from "./interfaces/IExercise.sol";
 import {IOptionsToken} from "./interfaces/IOptionsToken.sol";
-import "./interfaces/IERC20.sol";
-import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "./helpers/ReaperSwapper.sol";
-import "./helpers/AccessControlEnumerableUpgradeable.sol";
-import {ReaperAccessControl} from "./helpers/ReaperAccessControl.sol";
-import "oz/access/Ownable.sol";
+import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
+import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
+import "oz/token/ERC20/IERC20.sol";
+import "oz-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
+
 // import "./helpers/UUPSUpgradeable.sol";
 
 /* Errors */
@@ -57,7 +57,7 @@ contract OptionsCompounder is
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
      * @param _reaperSwapper - address to contract allowing to swap tokens in easy way
      * */
-    function __OptionsCompounder_Init(
+    function __OptionsCompounder_init(
         address _optionToken,
         address _addressProvider,
         address _reaperSwapper,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.13;
 
-import "../interfaces/IExercise.sol";
+import "../../../src/interfaces/IExercise.sol";
 import {OptionsToken} from "../OptionsToken.sol";
 
 abstract contract BaseExercise is IExercise {

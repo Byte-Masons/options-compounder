@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.13;
 
-import {console2} from "forge-std/Test.sol";
-
 import {Owned} from "solmate/auth/Owned.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
 import {BaseExercise, DiscountExerciseParams, DiscountExerciseReturnData} from "../exercise/BaseExercise.sol";
-import {IOracle} from "../interfaces/IOracle.sol";
+import {IOracle} from "../../../src/interfaces/IOracle.sol";
 import {OptionsToken} from "../OptionsToken.sol";
-import {IERC20} from "../interfaces/IERC20.sol";
+import {IERC20} from "oz/token/ERC20/IERC20.sol";
 
 /// @title Options Token Exercise Contract
 /// @author @bigbadbeard, @lookee, @eidolon
@@ -136,7 +134,6 @@ contract DiscountExercise is BaseExercise, Owned {
         uint256 paymentAmount = amount.mulWadUp(oracle.getPrice());
         if (paymentAmount > _params.maxPaymentAmount)
             revert Exercise__SlippageTooHigh();
-        console2.log("After calcs ", msg.sender, from, paymentAmount);
         paymentToken.transferFrom(from, treasury, paymentAmount);
 
         // mint underlying tokens to recipient

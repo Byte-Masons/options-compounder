@@ -2,18 +2,16 @@
 
 pragma solidity ^0.8.0;
 
-import {ILeverageable} from "vault-v2/interfaces/ILeverageable.sol";
 import {ReaperBaseStrategyv4} from "vault-v2/ReaperBaseStrategyv4.sol";
 import {IVault} from "vault-v2/interfaces/IVault.sol";
-import {ReaperMathUtils} from "vault-v2/libraries/ReaperMathUtils.sol";
 import {CErc20I} from "./interfaces/CErc20I.sol";
 import {CTokenI} from "./interfaces/CTokenI.sol";
 import {IComptroller} from "./interfaces/IComptroller.sol";
-
-import {SafeERC20Upgradeable} from "./helpers/SafeERC20Upgradeable.sol";
-import {IERC20Upgradeable} from "./interfaces/IERC20Upgradeable.sol";
-import {MathUpgradeable} from "./helpers/MathUpgradeable.sol";
-
+import {ILeverageable} from "vault-v2/interfaces/ILeverageable.sol";
+import {SafeERC20Upgradeable} from "oz-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import {IERC20Upgradeable} from "oz-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {MathUpgradeable} from "oz-upgradeable/utils/math/MathUpgradeable.sol";
+import {ReaperMathUtils} from "vault-v2/libraries/ReaperMathUtils.sol";
 import {OptionsCompounder} from "./OptionsCompounder.sol";
 
 /**
@@ -83,7 +81,7 @@ contract ReaperStrategySonne is
             _keepers
         );
         // Question: Should be nested deeper ?
-        __OptionsCompounder_Init(
+        __OptionsCompounder_init(
             _optionToken,
             _addressProvider,
             _swapper,
