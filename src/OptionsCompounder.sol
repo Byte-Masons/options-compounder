@@ -8,11 +8,12 @@ import {console2} from "forge-std/Test.sol";
 import {IFlashLoanReceiver} from "aave-v2/flashloan//interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
-import {DiscountExerciseParams} from "./interfaces/IExercise.sol";
+import {DiscountExerciseParams, DiscountExercise} from "test/mocks/exercise/DiscountExercise.sol"; // temporary path with test relation
 import {IOptionsToken} from "./interfaces/IOptionsToken.sol";
 import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
-import "oz/token/ERC20/IERC20.sol";
+import {IERC20} from "oz/token/ERC20/IERC20.sol";
+import {ERC20} from "solmate/tokens/ERC20.sol";
 import "oz-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
 
 // import "./helpers/UUPSUpgradeable.sol";
@@ -50,6 +51,12 @@ contract OptionsCompounder is
     address wantToken;
     bool flashloanFinished;
     uint256 gain = 0; // TODO: remove at the end
+
+    /* Events */
+    event OTokenCompounded(
+        uint256 indexed gainInWant,
+        uint256 indexed returned
+    );
 
     /**
      * List of params which are initiated at the begining:
@@ -127,8 +134,8 @@ contract OptionsCompounder is
     // TODO: Add access control.
     // Question: Will it be called by the strategy via "harvest" function (so internal func) or
     // we need heere access control like atLeastRole(KEEPER) ?
-    function harvestOTokens(uint256 amount, address option) external {
-        if (optionToken.isOption(option) == false) {
+    function harvestOTokens(uint256 amount, address exerciseContract) external {
+        if (optionToken.isExerciseContract(exerciseContract) == false) {
             revert OptionsCompounder__NotOption();
         }
         if (flashloanFinished == false) {
@@ -138,7 +145,7 @@ contract OptionsCompounder is
             "Balance in this contract: ",
             IERC20(address(optionToken)).balanceOf(address(this))
         );
-        IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
+        IERC20 paymentToken = DiscountExercise(exerciseContract).paymentToken();
         address receiverAddress = address(this);
         address onBehalfOf = address(this);
         uint16 referralCode = 0;
@@ -148,13 +155,17 @@ contract OptionsCompounder is
         assets[0] = address(paymentToken);
 
         uint256[] memory amounts = new uint256[](1);
-        amounts[0] = optionToken.getPaymentAmount(amount, option);
+        amounts[0] = optionToken.getPaymentAmount(amount, exerciseContract);
 
         // 0 = no debt, 1 = stable, 2 = variable
         uint256[] memory modes = new uint256[](2);
         modes[0] = 0;
 
-        bytes memory params = abi.encode(amount, option, initialBalance);
+        bytes memory params = abi.encode(
+            amount,
+            exerciseContract,
+            initialBalance
+        );
 
         lendingPool.flashLoan(
             receiverAddress,
@@ -182,14 +193,17 @@ contract OptionsCompounder is
         uint256 gainInWantToken = 0;
         /* Get underlying and payment tokens again to make sure there is no change between 
         harvest and excersice */
-        address underlyingToken = optionToken.getUnderlyingToken(option);
-        IERC20 paymentToken = IERC20(optionToken.getPaymentToken(option));
+        ERC20 underlyingToken = DiscountExercise(option).underlyingToken();
+        IERC20 paymentToken = DiscountExercise(option).paymentToken();
         /* Asset and paymentToken should be the same addresses */
         if (asset != address(paymentToken)) {
             revert OptionsCompounder__AssetNotEqualToPaymentToken();
         }
         bytes memory exerciseParams = abi.encode(
-            DiscountExerciseParams({maxPaymentAmount: amount})
+            DiscountExerciseParams({
+                maxPaymentAmount: amount,
+                deadline: type(uint256).max
+            })
         );
 
         // temporary logs
@@ -220,7 +234,7 @@ contract OptionsCompounder is
             "[After] BalanceOfOptionToken: ",
             IERC20(address(optionToken)).balanceOf(address(this))
         );
-        uint256 balanceOfUnderlyingToken = IERC20(underlyingToken).balanceOf(
+        uint256 balanceOfUnderlyingToken = underlyingToken.balanceOf(
             address(this)
         );
         console2.log("[After] BalanceOfOATHToken: ", balanceOfUnderlyingToken);
@@ -233,7 +247,7 @@ contract OptionsCompounder is
         );
 
         /* Approve the underlying token to make swap */
-        IERC20(underlyingToken).approve(
+        underlyingToken.approve(
             address(swapperSwaps),
             balanceOfUnderlyingToken
         );
@@ -243,7 +257,7 @@ contract OptionsCompounder is
         // underlying tokens can be swapped to the want token but swapper doesn't allow to put
         // here amountOut (it is amountIn acceptable for swapBal). Is it worth to play with this ?
         swapperSwaps.swapBal(
-            underlyingToken,
+            address(underlyingToken),
             asset,
             balanceOfUnderlyingToken,
             minAmountOutData,
@@ -253,7 +267,7 @@ contract OptionsCompounder is
         /* Console log area - temporary */
         console2.log(
             "2.Balance of underlyingToken: ",
-            IERC20(underlyingToken).balanceOf(address(this))
+            underlyingToken.balanceOf(address(this))
         );
         console2.log(
             "2.Balance of wantToken: ",
@@ -298,7 +312,7 @@ contract OptionsCompounder is
         /* Console log area - temporary */
         console2.log(
             "3.Balance of underlyingToken: ",
-            IERC20(underlyingToken).balanceOf(address(this))
+            underlyingToken.balanceOf(address(this))
         );
         console2.log("3.Balance of wantToken: ", gainInWantToken);
         console2.log(
@@ -306,7 +320,7 @@ contract OptionsCompounder is
             paymentToken.balanceOf(address(this))
         );
         console2.log("3.Amount paid back: ", totalAmount);
-
+        emit OTokenCompounded(gainInWantToken, totalAmount);
         return gainInWantToken;
     }
 

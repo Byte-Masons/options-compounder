@@ -8,7 +8,7 @@ import {BalancerOracle} from "../src/oracles/BalancerOracle.sol";
 import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "../src/interfaces/CErc20I.sol";
 import {OptionsToken, OptionStruct} from "./mocks/OptionsToken.sol";
-import {DiscountExerciseParams, DiscountExerciseReturnData, DiscountExercise} from "./mocks/exercise/DiscountExercise.sol";
+import {DiscountExerciseParams, DiscountExercise} from "./mocks/exercise/DiscountExercise.sol";
 import {MockBalancerTwapOracle} from "./mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
 import {TestERC20} from "./mocks/TestERC20.sol";
@@ -23,7 +23,7 @@ import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "../src/helpers/
 contract OptionsTokenTest is Test {
     using FixedPointMathLib for uint256;
     /* Constants */
-    uint16 constant ORACLE_MULTIPLIER = 5000; // 0.5
+    uint16 constant PRICE_MULTIPLIER = 5000; // 0.5
     uint56 constant ORACLE_SECS = 30 minutes;
     uint56 constant ORACLE_AGO = 2 minutes;
     uint128 constant ORACLE_MIN_PRICE = 1e10;
@@ -162,11 +162,14 @@ contract OptionsTokenTest is Test {
         );
 
         /* Oracle mocks deployment */
-        balancerTwapOracle = new MockBalancerTwapOracle();
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(underlyingToken);
+        tokens[1] = address(paymentToken);
+        balancerTwapOracle = new MockBalancerTwapOracle(tokens);
         oracle = new BalancerOracle(
             balancerTwapOracle,
+            address(underlyingToken),
             owner,
-            ORACLE_MULTIPLIER,
             ORACLE_SECS,
             ORACLE_AGO,
             ORACLE_MIN_PRICE
@@ -185,6 +188,7 @@ contract OptionsTokenTest is Test {
             paymentToken,
             ERC20(address(underlyingToken)),
             oracle,
+            PRICE_MULTIPLIER,
             treasury
         );
 
@@ -231,7 +235,7 @@ contract OptionsTokenTest is Test {
 
         // add exerciser to the list of options
         vm.startPrank(owner);
-        optionsToken.setOption(address(exerciser), true);
+        optionsToken.setExerciseContract(address(exerciser), true);
         vm.stopPrank();
 
         // set up contracts
@@ -344,7 +348,13 @@ contract OptionsTokenTest is Test {
         /* Decrease option discount in order to make redemption not profitable */
         /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) */
         vm.startPrank(owner);
-        oracle.setParams(10500, ORACLE_SECS, ORACLE_AGO, ORACLE_MIN_PRICE);
+        oracle.setParams(
+            address(underlyingToken),
+            10500,
+            ORACLE_SECS,
+            ORACLE_AGO,
+            ORACLE_MIN_PRICE
+        );
         vm.stopPrank();
 
         /* Check balances before compounding */
