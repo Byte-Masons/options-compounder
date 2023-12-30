@@ -74,6 +74,7 @@ contract OptionsTokenTest is Test {
     ReaperSwapper reaperSwapperProxy;
     ReaperSwapper reaperSwapper;
     Helper helper;
+    uint256 initTwap = 0;
 
     function fixture_prepareOptionToken(
         uint256 _amount,
@@ -84,9 +85,6 @@ contract OptionsTokenTest is Test {
         optionsToken.mint(tokenAdmin, _amount);
         optionsToken.transfer(_strategy, _amount);
         vm.stopPrank();
-
-        // vm.prank(strategy);
-        // optionsToken.approve(_strategy, _amount);
     }
 
     function setUp() public {
@@ -229,7 +227,7 @@ contract OptionsTokenTest is Test {
             beetxVault
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
-        uint256 initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Question: temporary inaccurate solution. How to get the newest price easily ?
+        initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Question: temporary inaccurate solution. How to get the newest price easily ?
         console2.log(">>>> Init TWAP: ", initTwap);
         oath.transfer(address(exerciser), underlyingBalance);
 
@@ -252,33 +250,33 @@ contract OptionsTokenTest is Test {
 
     function test_onlyOwnerFunctionsChecks(
         address hacker,
-        address hackersStrategy,
+        address hackersOption,
         uint256 amount
     ) public {
         /* Test vectors definition */
         amount = bound(amount, 100, oath.balanceOf(address(exerciser)));
-        vm.assume(hacker != tokenAdmin);
+        vm.assume(
+            hacker != tokenAdmin &&
+                hacker != keeper &&
+                hacker != management1 &&
+                hacker != management2 &&
+                hacker != management3
+        );
 
-        /* Hacker tries to add and remove strategy */
+        /* Hacker tries to perform harvest */
         vm.startPrank(hacker);
+
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__OnlyKeeperAllowed()"))
+        );
+        strategySonneProxy.harvestOTokens(amount, address(exerciser));
+
         /* Hacker tries to manipulate contract configuration */
-
-        vm.expectRevert();
-        //   abi.encodePacked(
-        //     'AccessControl: account ',
-        //     Strings.toHexString(uint160(account), 20),
-        //     ' is missing role ',
-        //     Strings.toHexString(uint256(role), 32)
-        //   )
-        vm.expectRevert();
-        strategySonneProxy.setOptionToken(hackersStrategy);
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
+        );
+        strategySonneProxy.setOptionToken(hackersOption);
         vm.stopPrank();
-
-        /* Not added hacker's strategy tries to use harvest and withdraw functions */
-        // vm.startPrank(hackersStrategy);
-        // vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotAStrategy()")));
-        // strategySonneProxy.harvestOTokens(amount, address(exerciser));
-        // vm.stopPrank();
     }
 
     function test_flashloanPositiveScenario(uint256 amount) public {
@@ -302,11 +300,10 @@ contract OptionsTokenTest is Test {
             IERC20(cusdc.underlying()).balanceOf(address(strategySonneProxy))
         );
 
-        // TODO: add access control
-        //vm.startPrank(keeper);
+        vm.startPrank(keeper);
         /* already approved in fixture_prepareOptionToken */
         strategySonneProxy.harvestOTokens(amount, address(exerciser));
-        //vm.stopPrank();
+        vm.stopPrank();
 
         // temporary logs
         console2.log(
@@ -345,16 +342,12 @@ contract OptionsTokenTest is Test {
         fixture_prepareOptionToken(amount, address(strategySonneProxy));
 
         /* Decrease option discount in order to make redemption not profitable */
-        /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) */
+        /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
         vm.startPrank(owner);
-        oracle.setParams(
-            address(underlyingToken),
-            10500,
-            ORACLE_SECS,
-            ORACLE_AGO,
-            ORACLE_MIN_PRICE
-        );
+        exerciser.setMultiplier(9999);
         vm.stopPrank();
+        /* Increase TWAP price to make flashloan not profitable */
+        balancerTwapOracle.setTwapValue(initTwap + ((initTwap * 10) / 100));
 
         /* Check balances before compounding */
         uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
@@ -370,15 +363,14 @@ contract OptionsTokenTest is Test {
         );
 
         /* Already approved in fixture_prepareOptionToken */
-        vm.expectRevert();
-        // bytes4(
-        //     keccak256("OptionsCompounder__FlashloanNotProfitable()")
-        // ) - cannot expect specific values in error
+        /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
+        );
 
-        // TODO: add access control
-        //vm.startPrank(keeper);
+        vm.startPrank(keeper);
         strategySonneProxy.harvestOTokens(amount, address(exerciser));
-        //vm.stopPrank();
+        vm.stopPrank();
 
         console2.log("Gain: ", strategySonneProxy.getLastGain());
     }

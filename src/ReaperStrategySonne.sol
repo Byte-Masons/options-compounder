@@ -80,12 +80,7 @@ contract ReaperStrategySonne is
             _multisigRoles,
             _keepers
         );
-        // Question: Should be nested deeper ?
-        __OptionsCompounder_init(
-            _optionToken,
-            _addressProvider,
-            _multisigRoles
-        );
+        __OptionsCompounder_init(_optionToken, _addressProvider);
         markets = [_cWant];
         comptroller = IComptroller(cWant.comptroller());
 
@@ -607,11 +602,34 @@ contract ReaperStrategySonne is
         updateBalance();
     }
 
-    function wantToken() public view virtual override returns (address) {
+    /* Override functions */
+    function wantToken() internal view virtual override returns (address) {
         return want;
     }
 
-    function swapperSwaps() public view virtual override returns (address) {
+    function swapperSwaps() internal view virtual override returns (address) {
         return address(swapper);
+    }
+
+    /**
+     * @dev Returns {true} if {_account} has been granted {_role}. Subclasses should override
+     *      this to specify their unique role-checking criteria.
+     */
+    function _hasRoleOptionsCompounder(
+        bytes32 _role,
+        address _account
+    ) internal view override returns (bool) {
+        return hasRole(_role, _account);
+    }
+
+    function getKeeperRole() internal pure override returns (bytes32) {
+        return KEEPER;
+    }
+
+    function getAdminRoles() internal pure override returns (bytes32[] memory) {
+        bytes32[] memory admins = new bytes32[](2);
+        admins[0] = ADMIN;
+        admins[1] = DEFAULT_ADMIN_ROLE;
+        return admins;
     }
 }

@@ -14,31 +14,23 @@ import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
-import "oz-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
+import "oz-upgradeable/proxy/utils/Initializable.sol";
 
 // import "./helpers/UUPSUpgradeable.sol";
 
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
 /* Main contract */
-abstract contract OptionsCompounder is
-    IFlashLoanReceiver,
-    AccessControlEnumerableUpgradeable
-{
+abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     /* Errors */
-    error OptionsCompounder__NotOption();
+    error OptionsCompounder__NotExerciseContract();
     error OptionsCompounder__TooMuchAssetsLoaned();
-    error OptionsCompounder__NotEnoughFunds();
-    error OptionsCompounder__NotAStrategy();
-    error OptionsCompounder__StrategyNotFound();
-    error OptionsCompounder__StrategyAlreadyExists();
-    error OptionsCompounder__FlashloanNotProfitable(
-        uint256 fundsAvailable,
-        uint256 fundsToPay
-    );
+    error OptionsCompounder__FlashloanNotProfitable();
     error OptionsCompounder__AssetNotEqualToPaymentToken();
-    error OptionsCompounder__NotFinished();
-    error OptionsCompounder__OnlyThreeRolesAllowed();
+    error OptionsCompounder__FlashloanNotFinished();
+    error OptionsCompounder__OnlyKeeperAllowed();
+    error OptionsCompounder__OnlyAdminsAllowed();
+    error OptionsCompounder__FlashloanNotTriggered();
 
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
@@ -58,6 +50,24 @@ abstract contract OptionsCompounder is
         uint256 indexed returned
     );
 
+    /* Modifiers */
+    modifier onlyKeeper() {
+        if (_hasRoleOptionsCompounder(getKeeperRole(), msg.sender) == false) {
+            revert OptionsCompounder__OnlyKeeperAllowed();
+        }
+        _;
+    }
+
+    modifier onlyAdmins() {
+        bytes32[] memory admins = getAdminRoles();
+        for (uint8 idx = 0; idx < admins.length; idx++) {
+            if (_hasRoleOptionsCompounder(admins[idx], msg.sender) == false) {
+                revert OptionsCompounder__OnlyAdminsAllowed();
+            }
+        }
+        _;
+    }
+
     /**
      * List of params which are initiated at the begining:
      * @param _optionToken - option token address which allows to redeem underlying token via operation "exercise"
@@ -65,28 +75,17 @@ abstract contract OptionsCompounder is
      * */
     function __OptionsCompounder_init(
         address _optionToken,
-        address _addressProvider,
-        address[] memory _multisigRoles
+        address _addressProvider
     ) internal onlyInitializing {
         optionToken = IOptionsToken(_optionToken);
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         lendingPool = ILendingPool(addressProvider.getLendingPool());
-        // swapperSwaps = ISwapperSwaps(_reaperSwapper);
-        //wantToken = _wantToken;
         flashloanFinished = true;
-        if (_multisigRoles.length != 3) {
-            revert OptionsCompounder__OnlyThreeRolesAllowed();
-        }
-        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[0]);
-        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[1]);
-        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[2]);
     }
 
     /***************************** Setters ***********************************/
     /* Only owner functions - in the future multi level access control*/
-    function setOptionToken(
-        address _optionToken
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setOptionToken(address _optionToken) external onlyAdmins {
         optionToken = IOptionsToken(_optionToken);
     }
 
@@ -100,6 +99,9 @@ abstract contract OptionsCompounder is
         address initiator,
         bytes calldata params
     ) external override returns (bool) {
+        if (flashloanFinished != false) {
+            revert OptionsCompounder__FlashloanNotTriggered();
+        }
         if (
             assets.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
             amounts.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
@@ -122,15 +124,15 @@ abstract contract OptionsCompounder is
      * @dev function initiate flashloan in order to exercise option tokens and compound rewards
      * in underlying tokens to want token
      */
-    // TODO: Add access control.
-    // Question: Will it be called by the strategy via "harvest" function (so internal func) or
-    // we need heere access control like atLeastRole(KEEPER) ?
-    function harvestOTokens(uint256 amount, address exerciseContract) external {
+    function harvestOTokens(
+        uint256 amount,
+        address exerciseContract
+    ) external onlyKeeper {
         if (optionToken.isExerciseContract(exerciseContract) == false) {
-            revert OptionsCompounder__NotOption();
+            revert OptionsCompounder__NotExerciseContract();
         }
         if (flashloanFinished == false) {
-            revert OptionsCompounder__NotFinished();
+            revert OptionsCompounder__FlashloanNotFinished();
         }
         console2.log(
             "Balance in this contract: ",
@@ -157,7 +159,7 @@ abstract contract OptionsCompounder is
             exerciseContract,
             initialBalance
         );
-
+        flashloanFinished = false;
         lendingPool.flashLoan(
             receiverAddress,
             assets,
@@ -167,7 +169,6 @@ abstract contract OptionsCompounder is
             params,
             referralCode
         );
-        flashloanFinished = false;
     }
 
     /** @dev private function that helps to execute flashloan and makes it more modular */
@@ -270,10 +271,7 @@ abstract contract OptionsCompounder is
         uint256 assetBalance = paymentToken.balanceOf(address(this));
 
         if ((assetBalance - initialBalance) <= totalAmount) {
-            revert OptionsCompounder__FlashloanNotProfitable(
-                (assetBalance - initialBalance),
-                totalAmount
-            );
+            revert OptionsCompounder__FlashloanNotProfitable();
         }
         /* Protected by statement above */
         gainInPaymentToken = (assetBalance - initialBalance) - totalAmount;
@@ -330,33 +328,22 @@ abstract contract OptionsCompounder is
         return lendingPool;
     }
 
-    function wantToken() public view virtual returns (address);
+    /* Virtual functions */
+    function wantToken() internal view virtual returns (address);
 
-    function swapperSwaps() public view virtual returns (address);
+    function swapperSwaps() internal view virtual returns (address);
 
-    // Question: Shall we use reaper access control somehow in this contract ?
-    // /**
-    //  * @dev Returns an array of all the relevant roles arranged in descending order of privilege.
-    //  *      Subclasses should override this to specify their unique roles arranged in the correct
-    //  *      order, for example, [SUPER-ADMIN, ADMIN, GUARDIAN, STRATEGIST].
-    //  */
-    // function _cascadingAccessRoles()
-    //     internal
-    //     pure
-    //     override
-    //     returns (bytes32[] memory)
-    // {
-    //     bytes32[] memory cascadingAccessRoles = new bytes32[](5);
-    //     cascadingAccessRoles[0] = DEFAULT_ADMIN_ROLE;
-    //     cascadingAccessRoles[1] = ADMIN;
-    //     cascadingAccessRoles[2] = GUARDIAN;
-    //     return cascadingAccessRoles;
-    // }
+    /**
+     * @dev Returns an array of all the relevant roles arranged in descending order of privilege.
+     *      Subclasses should override this to specify their unique roles arranged in the correct
+     *      order, for example, [SUPER-ADMIN, ADMIN, GUARDIAN, STRATEGIST].
+     */
+    function _hasRoleOptionsCompounder(
+        bytes32 _role,
+        address _account
+    ) internal view virtual returns (bool);
 
-    // function _hasRole(
-    //     bytes32 _role,
-    //     address _account
-    // ) internal view override returns (bool) {
-    //     return hasRole(_role, _account);
-    // }
+    function getKeeperRole() internal pure virtual returns (bytes32);
+
+    function getAdminRoles() internal pure virtual returns (bytes32[] memory);
 }
