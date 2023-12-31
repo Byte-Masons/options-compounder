@@ -8,8 +8,8 @@ import {console2} from "forge-std/Test.sol";
 import {IFlashLoanReceiver} from "aave-v2/flashloan//interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
-import {DiscountExerciseParams, DiscountExercise} from "test/mocks/exercise/DiscountExercise.sol"; // temporary path with test relation
-import {IOptionsToken} from "./interfaces/IOptionsToken.sol";
+import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol"; // temporary path with test relation
+import {IOptionsToken} from "optionsToken/src/interfaces/IOptionsToken.sol";
 import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
@@ -38,9 +38,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     /* Storages */
     IOptionsToken private optionToken;
     ILendingPoolAddressesProvider private addressProvider;
-    // ISwapperSwaps private swapperSwaps;
     ILendingPool private lendingPool;
-    //address wantToken;
     bool flashloanFinished;
     uint256 gain = 0; // TODO: remove at the end
 
@@ -153,7 +151,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         assets[0] = address(paymentToken);
 
         uint256[] memory amounts = new uint256[](1);
-        amounts[0] = optionToken.getPaymentAmount(amount, exerciseContract);
+        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(
+            amount
+        );
 
         // 0 = no debt, 1 = stable, 2 = variable
         uint256[] memory modes = new uint256[](2);

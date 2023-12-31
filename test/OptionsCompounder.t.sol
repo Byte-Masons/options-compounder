@@ -4,14 +4,13 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 
 import {ReaperStrategySonne} from "../src/ReaperStrategySonne.sol";
-import {BalancerOracle} from "../src/oracles/BalancerOracle.sol";
+import {BalancerOracle} from "optionsToken/src/oracles/BalancerOracle.sol";
 import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "../src/interfaces/CErc20I.sol";
-import {OptionsToken, OptionStruct} from "./mocks/OptionsToken.sol";
-import {DiscountExerciseParams, DiscountExercise} from "./mocks/exercise/DiscountExercise.sol";
-import {MockBalancerTwapOracle} from "./mocks/MockBalancerTwapOracle.sol";
+import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
+import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
+import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
-import {TestERC20} from "./mocks/TestERC20.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
@@ -64,6 +63,8 @@ contract OptionsTokenTest is Test {
 
     /* Contract variables */
     OptionsToken optionsToken;
+    ERC1967Proxy optionsProxy;
+    OptionsToken optionsTokenProxy;
     DiscountExercise exerciser;
     BalancerOracle oracle;
     MockBalancerTwapOracle balancerTwapOracle;
@@ -82,8 +83,8 @@ contract OptionsTokenTest is Test {
     ) public {
         /* mint options tokens and transfer them to the strategy (rewards simulation) */
         vm.startPrank(tokenAdmin);
-        optionsToken.mint(tokenAdmin, _amount);
-        optionsToken.transfer(_strategy, _amount);
+        optionsTokenProxy.mint(tokenAdmin, _amount);
+        optionsTokenProxy.transfer(_strategy, _amount);
         vm.stopPrank();
     }
 
@@ -174,14 +175,19 @@ contract OptionsTokenTest is Test {
         );
 
         /* Option token deployment */
-        optionsToken = new OptionsToken(
+        vm.startPrank(owner);
+        optionsToken = new OptionsToken();
+        optionsProxy = new ERC1967Proxy(address(optionsToken), "");
+        optionsTokenProxy = OptionsToken(address(optionsProxy));
+        optionsTokenProxy.initialize(
             "TIT Call Option Token",
             "oTIT",
-            owner,
+            tokenAdmin,
             tokenAdmin
         );
+
         exerciser = new DiscountExercise(
-            optionsToken,
+            optionsTokenProxy,
             owner,
             paymentToken,
             ERC20(address(underlyingToken)),
@@ -191,7 +197,6 @@ contract OptionsTokenTest is Test {
         );
 
         /* Option compounder deployment */
-        vm.startPrank(owner);
         console2.log("Deployment contract");
         strategySonne = new ReaperStrategySonne();
         console2.log("Deployment strategy proxy");
@@ -205,7 +210,7 @@ contract OptionsTokenTest is Test {
             multisigRoles,
             keepers,
             CUSDC,
-            address(optionsToken),
+            address(optionsTokenProxy),
             POOL_ADDRESSES_PROVIDER,
             targetLTV
         );
@@ -233,7 +238,7 @@ contract OptionsTokenTest is Test {
 
         // add exerciser to the list of options
         vm.startPrank(owner);
-        optionsToken.setExerciseContract(address(exerciser), true);
+        optionsTokenProxy.setExerciseContract(address(exerciser), true);
         vm.stopPrank();
 
         // set up contracts
@@ -242,7 +247,7 @@ contract OptionsTokenTest is Test {
 
         // temp logs
         console2.log("Sonne strategy: ", address(strategySonneProxy));
-        console2.log("Options Token: ", address(optionsToken));
+        console2.log("Options Token: ", address(optionsTokenProxy));
         console2.log("Address of this contract: ", address(this));
         console2.log("Address of owner: ", owner);
         console2.log("Address of token admin: ", tokenAdmin);
@@ -371,7 +376,5 @@ contract OptionsTokenTest is Test {
         vm.startPrank(keeper);
         strategySonneProxy.harvestOTokens(amount, address(exerciser));
         vm.stopPrank();
-
-        console2.log("Gain: ", strategySonneProxy.getLastGain());
     }
 }
