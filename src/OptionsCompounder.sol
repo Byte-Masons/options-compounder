@@ -59,11 +59,16 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     }
 
     modifier onlyAdmins() {
+        bool hasRole = false;
         bytes32[] memory admins = getAdminRoles();
         for (uint8 idx = 0; idx < admins.length; idx++) {
-            if (_hasRoleOptionsCompounder(admins[idx], msg.sender) == false) {
-                revert OptionsCompounder__OnlyAdminsAllowed();
+            if (_hasRoleOptionsCompounder(admins[idx], msg.sender) != false) {
+                hasRole = true;
+                break;
             }
+        }
+        if (hasRole == false) {
+            revert OptionsCompounder__OnlyAdminsAllowed();
         }
         _;
     }
