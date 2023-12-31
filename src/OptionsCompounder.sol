@@ -36,10 +36,10 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
 
     /* Storages */
-    IOptionsToken private optionToken;
     ILendingPoolAddressesProvider private addressProvider;
     ILendingPool private lendingPool;
-    bool flashloanFinished;
+    bool private flashloanFinished;
+    IOptionsToken public optionToken;
     uint256 gain = 0; // TODO: remove at the end
 
     /* Events */

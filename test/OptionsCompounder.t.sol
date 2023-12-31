@@ -120,8 +120,6 @@ contract OptionsTokenTest is Test {
         multisigRoles[2] = management3;
         keepers[0] = keeper;
 
-        // Question: Doesn't matter in this test but what are the reasonable values ??
-        // Possible range 0.0001 - 0.01 ether
         uint256 targetLTV = 0.0001 ether;
 
         /**** Contract deployments and configurations ****/
@@ -195,6 +193,8 @@ contract OptionsTokenTest is Test {
             PRICE_MULTIPLIER,
             treasury
         );
+        // add exerciser to the list of options
+        optionsTokenProxy.setExerciseContract(address(exerciser), true);
 
         /* Option compounder deployment */
         console2.log("Deployment contract");
@@ -236,11 +236,6 @@ contract OptionsTokenTest is Test {
         console2.log(">>>> Init TWAP: ", initTwap);
         oath.transfer(address(exerciser), underlyingBalance);
 
-        // add exerciser to the list of options
-        vm.startPrank(owner);
-        optionsTokenProxy.setExerciseContract(address(exerciser), true);
-        vm.stopPrank();
-
         // set up contracts
         balancerTwapOracle.setTwapValue(initTwap);
         paymentToken.approve(address(exerciser), type(uint256).max);
@@ -253,9 +248,9 @@ contract OptionsTokenTest is Test {
         console2.log("Address of token admin: ", tokenAdmin);
     }
 
-    function test_onlyOwnerFunctionsChecks(
+    function test_accessControlFunctionsChecks(
         address hacker,
-        address hackersOption,
+        address randomOption,
         uint256 amount
     ) public {
         /* Test vectors definition */
@@ -270,7 +265,6 @@ contract OptionsTokenTest is Test {
 
         /* Hacker tries to perform harvest */
         vm.startPrank(hacker);
-
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__OnlyKeeperAllowed()"))
         );
@@ -280,8 +274,14 @@ contract OptionsTokenTest is Test {
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
         );
-        strategySonneProxy.setOptionToken(hackersOption);
+        strategySonneProxy.setOptionToken(randomOption);
         vm.stopPrank();
+
+        /* Admin tries to set different option token */
+        vm.startPrank(owner);
+        strategySonneProxy.setOptionToken(randomOption);
+        vm.stopPrank();
+        assertEq(address(strategySonneProxy.optionToken()), randomOption);
     }
 
     function test_flashloanPositiveScenario(uint256 amount) public {
@@ -322,9 +322,6 @@ contract OptionsTokenTest is Test {
         console2.log("[Test] 2. Gain: ", strategySonneProxy.getLastGain());
 
         /* Check balances after compounding */
-        // Question: Do we need accurate calculations about profits?
-        // Ans: Yes an oracle needs to be deployed and used
-
         /* Assertions */
         assertEq(
             strategySonneProxy.getLastGain() > 0,
