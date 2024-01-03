@@ -22,3 +22,6 @@
 [submodule "lib/vault-v2"]
 	path = lib/vault-v2
 	url = https://github.com/Byte-Masons/vault-v2
+[submodule "lib/options-token"]
+	path = lib/options-token
+	url = https://github.com/byte-masons/options-token
