@@ -202,7 +202,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         uint256 gainInWantToken = 0;
         /* Get underlying and payment tokens again to make sure there is no change between 
         harvest and excersice */
-        ERC20 underlyingToken = DiscountExercise(option).underlyingToken();
+        IERC20 underlyingToken = DiscountExercise(option).underlyingToken();
         IERC20 paymentToken = DiscountExercise(option).paymentToken();
         /* Asset and paymentToken should be the same addresses */
         if (asset != address(paymentToken)) {

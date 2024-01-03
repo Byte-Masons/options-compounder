@@ -53,7 +53,8 @@ contract OptionsTokenTest is Test {
     address beetxVault = BEETX_VAULT_OP;
     address owner;
     address tokenAdmin;
-    address treasury;
+    address[] treasuries;
+    uint256[] feeBPS;
     address strategist = address(4);
     address vault;
     address management1;
@@ -95,12 +96,17 @@ contract OptionsTokenTest is Test {
         /* set up accounts */
         owner = makeAddr("owner");
         tokenAdmin = makeAddr("tokenAdmin");
-        treasury = makeAddr("treasury");
+        treasuries = new address[](2);
+        treasuries[0] = makeAddr("treasury1");
+        treasuries[1] = makeAddr("treasury2");
         vault = makeAddr("vault");
         management1 = makeAddr("management1");
         management2 = makeAddr("management2");
         management3 = makeAddr("management3");
         keeper = makeAddr("keeper");
+        feeBPS = new uint256[](2);
+        feeBPS[0] = 10;
+        feeBPS[1] = 2000;
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
@@ -180,7 +186,6 @@ contract OptionsTokenTest is Test {
         optionsTokenProxy.initialize(
             "TIT Call Option Token",
             "oTIT",
-            tokenAdmin,
             tokenAdmin
         );
 
@@ -188,10 +193,11 @@ contract OptionsTokenTest is Test {
             optionsTokenProxy,
             owner,
             paymentToken,
-            ERC20(address(underlyingToken)),
+            underlyingToken,
             oracle,
             PRICE_MULTIPLIER,
-            treasury
+            treasuries,
+            feeBPS
         );
         // add exerciser to the list of options
         optionsTokenProxy.setExerciseContract(address(exerciser), true);
