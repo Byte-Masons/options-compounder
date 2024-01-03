@@ -50,7 +50,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
     /* Modifiers */
     modifier onlyKeeper() {
-        if (_hasRoleOptionsCompounder(getKeeperRole(), msg.sender) == false) {
+        if (
+            _hasRoleForOptionsCompounder(getKeeperRole(), msg.sender) == false
+        ) {
             revert OptionsCompounder__OnlyKeeperAllowed();
         }
         _;
@@ -60,7 +62,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         bool hasRole = false;
         bytes32[] memory admins = getAdminRoles();
         for (uint8 idx = 0; idx < admins.length; idx++) {
-            if (_hasRoleOptionsCompounder(admins[idx], msg.sender) != false) {
+            if (
+                _hasRoleForOptionsCompounder(admins[idx], msg.sender) != false
+            ) {
                 hasRole = true;
                 break;
             }
@@ -88,6 +92,10 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
     /***************************** Setters ***********************************/
     /* Only owner functions - in the future multi level access control*/
+    /**
+     * @dev Sets option token address. Can be executed only by admins
+     * @param _optionToken - address of option token contract
+     */
     function setOptionToken(address _optionToken) external onlyAdmins {
         optionToken = IOptionsToken(_optionToken);
     }
@@ -99,7 +107,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         address[] calldata assets,
         uint256[] calldata amounts,
         uint256[] calldata premiums,
-        address initiator,
+        address,
         bytes calldata params
     ) external override returns (bool) {
         if (flashloanFinished != false) {
@@ -124,8 +132,10 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     }
 
     /**
-     * @dev function initiate flashloan in order to exercise option tokens and compound rewards
-     * in underlying tokens to want token
+     * @dev Function initiate flashloan in order to exercise option tokens and compound rewards
+     * in underlying tokens to want token. Can be executed only by keeper role.
+     * @param amount - amount of option tokens to exercise
+     * @param exerciseContract - address of exercise contract (DiscountContract)
      */
     function harvestOTokens(
         uint256 amount,
@@ -176,7 +186,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         );
     }
 
-    /** @dev private function that helps to execute flashloan and makes it more modular */
+    /** @dev Private function that helps to execute flashloan and makes it more modular
+     *  @return gainInWantToken - gain from the option exercise after repayment of all debt from flashloan
+     */
     function exerciseOptionAndReturnDebt(
         address asset,
         uint256 amount,
@@ -343,7 +355,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      *      Subclasses should override this to specify their unique roles arranged in the correct
      *      order, for example, [SUPER-ADMIN, ADMIN, GUARDIAN, STRATEGIST].
      */
-    function _hasRoleOptionsCompounder(
+    function _hasRoleForOptionsCompounder(
         bytes32 _role,
         address _account
     ) internal view virtual returns (bool);

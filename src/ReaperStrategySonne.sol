@@ -615,7 +615,7 @@ contract ReaperStrategySonne is
      * @dev Returns {true} if {_account} has been granted {_role}. Subclasses should override
      *      this to specify their unique role-checking criteria.
      */
-    function _hasRoleOptionsCompounder(
+    function _hasRoleForOptionsCompounder(
         bytes32 _role,
         address _account
     ) internal view override returns (bool) {
