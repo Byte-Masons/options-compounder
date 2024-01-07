@@ -195,15 +195,20 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         uint256 premium,
         bytes calldata params
     ) private returns (uint256) {
-        (uint256 optionsAmount, address option, uint256 initialBalance) = abi
-            .decode(params, (uint256, address, uint256));
+        (
+            uint256 optionsAmount,
+            address exerciserContract,
+            uint256 initialBalance
+        ) = abi.decode(params, (uint256, address, uint256));
 
         uint256 gainInPaymentToken = 0;
         uint256 gainInWantToken = 0;
         /* Get underlying and payment tokens again to make sure there is no change between 
         harvest and excersice */
-        IERC20 underlyingToken = DiscountExercise(option).underlyingToken();
-        IERC20 paymentToken = DiscountExercise(option).paymentToken();
+        IERC20 underlyingToken = DiscountExercise(exerciserContract)
+            .underlyingToken();
+        IERC20 paymentToken = DiscountExercise(exerciserContract)
+            .paymentToken();
         /* Asset and paymentToken should be the same addresses */
         if (asset != address(paymentToken)) {
             revert OptionsCompounder__AssetNotEqualToPaymentToken();
@@ -226,11 +231,11 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         );
 
         /* Approve spending option token and exercise in order to get underlying token */
-        paymentToken.approve(option, amount);
+        paymentToken.approve(exerciserContract, amount);
         optionToken.exercise(
             optionsAmount,
             address(this),
-            option,
+            exerciserContract,
             exerciseParams
         );
 
@@ -283,6 +288,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             "2.Balance of paymentToken: ",
             paymentToken.balanceOf(address(this))
         );
+        console2.log("2.Initial Balance of paymentToken: ", initialBalance);
 
         /* Calculate profit and revert if it is not profitable */
         uint256 assetBalance = paymentToken.balanceOf(address(this));
