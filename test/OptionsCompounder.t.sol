@@ -9,7 +9,8 @@ import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "../src/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
-import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
+import {IBalancerTwapOracle} from "optionsToken/src/interfaces/IBalancerTwapOracle.sol";
+import {IVault} from "../src/interfaces/IBalVault.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
@@ -69,7 +70,7 @@ contract OptionsTokenTest is Test {
     OptionsToken optionsTokenProxy;
     DiscountExercise exerciser;
     BalancerOracle oracle;
-    MockBalancerTwapOracle balancerTwapOracle;
+    IBalancerTwapOracle balancerTwapOracle;
     ReaperStrategySonne strategySonne;
     ReaperStrategySonne strategySonneProxy;
     ReaperSwapper reaperSwapperProxy;
@@ -160,9 +161,10 @@ contract OptionsTokenTest is Test {
         address[] memory tokens = new address[](2);
         tokens[0] = address(underlyingToken);
         tokens[1] = address(paymentToken);
-        balancerTwapOracle = new MockBalancerTwapOracle(tokens);
+        (address balPool, ) = IVault(BEETX_VAULT_OP).getPool(OATHV2_ETH_BPT);
+
         oracle = new BalancerOracle(
-            balancerTwapOracle,
+            IBalancerTwapOracle(balPool),
             address(underlyingToken),
             owner,
             ORACLE_SECS,
@@ -231,11 +233,13 @@ contract OptionsTokenTest is Test {
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Question: temporary inaccurate solution. How to get the newest price easily ?
-        console2.log(">>>> Init TWAP: ", initTwap);
+        console2.log(">>>>>>>>>>>>>> Init TWAP: ", initTwap);
+
+        console2.log(">>>>>>>>>>>>>> Price from oracle: ", oracle.getPrice());
         oath.transfer(address(exerciser), underlyingBalance);
 
         // set up contracts
-        balancerTwapOracle.setTwapValue(initTwap);
+        // balancerTwapOracle.setTwapValue(initTwap);
         paymentToken.approve(address(exerciser), type(uint256).max);
 
         // temp logs
@@ -367,7 +371,7 @@ contract OptionsTokenTest is Test {
         exerciser.setMultiplier(9999);
         vm.stopPrank();
         /* Increase TWAP price to make flashloan not profitable */
-        balancerTwapOracle.setTwapValue(initTwap + ((initTwap * 10) / 100));
+        //balancerTwapOracle.setTwapValue(initTwap + ((initTwap * 10) / 100));
 
         /* Check balances before compounding */
         uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
