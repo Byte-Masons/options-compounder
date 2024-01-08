@@ -3,10 +3,11 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 
-import {ReaperStrategySonne} from "../src/ReaperStrategySonne.sol";
+import {ReaperStrategySonne} from "./strategies/ReaperStrategySonne.sol";
+import {ReaperStrategyGranary} from "./strategies/ReaperStrategyGranary.sol";
 import {BalancerOracle} from "optionsToken/src/oracles/BalancerOracle.sol";
 import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
-import {CErc20I} from "../src/interfaces/CErc20I.sol";
+import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
 import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
@@ -15,6 +16,7 @@ import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
+import {IAToken} from "./strategies/interfaces/IAToken.sol";
 
 // import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperSwapper.sol";
@@ -36,6 +38,8 @@ contract OptionsTokenTest is Test {
     address constant WETH = 0x4200000000000000000000000000000000000006;
     address constant OATH = 0x00e1724885473B63bCE08a9f0a52F35b0979e35A; // V1: 0x39FdE572a18448F8139b7788099F0a0740f51205;
     address constant CUSDC = 0xEC8FEa79026FfEd168cCf5C627c7f486D77b765F;
+    address constant GUSDC = 0x7A0FDDBA78FF45D353B1630B77f4D175A00df0c0;
+    address constant DATA_PROVIDER = 0x9546F673eF71Ff666ae66d01Fd6E7C6Dae5a9995;
     bytes32 constant OATHV1_ETH_BPT =
         0xd20f6f1d8a675cdca155cb07b5dc9042c467153f0002000000000000000000bc; /* OATHv1/ETH BPT */
     bytes32 constant OATHV2_ETH_BPT =
@@ -43,6 +47,8 @@ contract OptionsTokenTest is Test {
     bytes32 constant BTC_WETH_USDC_BPT =
         0x5028497af0c9a54ea8c6d42a054c0341b9fc6168000100000000000000000004;
     uint256 constant AMOUNT = 2e18; // 2 ETH
+
+    address constant REWARDER = 0x6A0406B8103Ec68EE9A713A073C7bD587c5e04aD;
 
     /* Variables */
     ERC20 weth = ERC20(WETH);
@@ -72,7 +78,8 @@ contract OptionsTokenTest is Test {
     MockBalancerTwapOracle balancerTwapOracle;
     ReaperStrategySonne strategySonne;
     ReaperStrategySonne strategySonneProxy;
-    ReaperSwapper reaperSwapperProxy;
+    ReaperStrategyGranary strategyGranary;
+    ReaperStrategyGranary strategyGranaryProxy;
     ReaperSwapper reaperSwapper;
     Helper helper;
     uint256 initTwap = 0;
@@ -131,25 +138,25 @@ contract OptionsTokenTest is Test {
         helper = new Helper();
 
         /* Reaper deployment and configuration */
-        reaperSwapperProxy = new ReaperSwapper(
+        reaperSwapper = new ReaperSwapper(
             strategists,
             address(this),
             address(this)
         );
 
-        reaperSwapperProxy.updateBalSwapPoolID(
+        reaperSwapper.updateBalSwapPoolID(
             address(weth),
             address(oath),
             BEETX_VAULT_OP,
             OATHV2_ETH_BPT
         );
-        reaperSwapperProxy.updateBalSwapPoolID(
+        reaperSwapper.updateBalSwapPoolID(
             address(oath),
             address(weth),
             BEETX_VAULT_OP,
             OATHV2_ETH_BPT
         );
-        reaperSwapperProxy.updateBalSwapPoolID(
+        reaperSwapper.updateBalSwapPoolID(
             address(weth),
             cusdc.underlying(),
             BEETX_VAULT_OP,
@@ -194,7 +201,7 @@ contract OptionsTokenTest is Test {
         // add exerciser to the list of options
         optionsTokenProxy.setExerciseContract(address(exerciser), true);
 
-        /* Option compounder deployment */
+        /* Sonne strategy deployment */
         console2.log("Deployment contract");
         strategySonne = new ReaperStrategySonne();
         console2.log("Deployment strategy proxy");
@@ -203,7 +210,7 @@ contract OptionsTokenTest is Test {
         strategySonneProxy = ReaperStrategySonne(address(tmpProxy));
         strategySonneProxy.initialize(
             vault,
-            address(reaperSwapperProxy),
+            address(reaperSwapper),
             strategists,
             multisigRoles,
             keepers,
@@ -211,6 +218,28 @@ contract OptionsTokenTest is Test {
             address(optionsTokenProxy),
             POOL_ADDRESSES_PROVIDER,
             targetLTV
+        );
+
+        /* Granary strategy deployment */
+        console2.log("Deployment contract");
+        strategyGranary = new ReaperStrategyGranary();
+        console2.log("Deployment strategy proxy");
+        tmpProxy = new ERC1967Proxy(address(strategyGranary), "");
+        console2.log("Initialization proxied sonne strategy");
+        strategyGranaryProxy = ReaperStrategyGranary(address(tmpProxy));
+        strategyGranaryProxy.initialize(
+            vault,
+            address(reaperSwapper),
+            strategists,
+            multisigRoles,
+            keepers,
+            IAToken(GUSDC),
+            targetLTV,
+            2 * targetLTV,
+            POOL_ADDRESSES_PROVIDER,
+            DATA_PROVIDER,
+            REWARDER,
+            address(optionsTokenProxy)
         );
         vm.stopPrank();
 
@@ -221,8 +250,8 @@ contract OptionsTokenTest is Test {
             MinAmountOutKind.Absolute,
             0
         );
-        weth.approve(address(reaperSwapperProxy), AMOUNT);
-        reaperSwapperProxy.swapBal(
+        weth.approve(address(reaperSwapper), AMOUNT);
+        reaperSwapper.swapBal(
             address(weth),
             address(underlyingToken),
             AMOUNT,
@@ -282,7 +311,7 @@ contract OptionsTokenTest is Test {
         assertEq(address(strategySonneProxy.optionToken()), randomOption);
     }
 
-    function test_flashloanPositiveScenario(uint256 amount) public {
+    function test_flashloanPositiveScenarioSonne(uint256 amount) public {
         /* Test vectors definition */
         amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
 
@@ -348,6 +377,77 @@ contract OptionsTokenTest is Test {
         );
         assertEq(
             0 == optionsTokenProxy.balanceOf(address(strategySonneProxy)),
+            true,
+            "Options token balance is not 0"
+        );
+    }
+
+    function test_flashloanPositiveScenarioGranary(uint256 amount) public {
+        /* Test vectors definition */
+        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+
+        /* prepare option tokens - distribute them to the specified strategy 
+        and approve for spending */
+        fixture_prepareOptionToken(amount, address(strategyGranaryProxy));
+
+        /* Check balances before compounding */
+        IERC20 usdc = IERC20(cusdc.underlying());
+        uint256 wethBalance = weth.balanceOf(address(strategyGranaryProxy));
+        uint256 wantBalance = usdc.balanceOf(address(strategyGranaryProxy));
+        uint256 optionsBalance = optionsTokenProxy.balanceOf(
+            address(strategyGranaryProxy)
+        );
+        // temporary logs
+        console2.log(
+            "[Test] 1. Strategy before flashloan redemption (weth): ",
+            wethBalance
+        );
+        console2.log(
+            "[Test] 1. Strategy before flashloan redemption (want): ",
+            IERC20(cusdc.underlying()).balanceOf(address(strategyGranaryProxy))
+        );
+
+        vm.startPrank(keeper);
+        /* already approved in fixture_prepareOptionToken */
+        strategyGranaryProxy.harvestOTokens(amount, address(exerciser));
+        vm.stopPrank();
+
+        // temporary logs
+        console2.log(
+            "[Test] 2. Strategy after flashloan redemption (weth): ",
+            weth.balanceOf(address(strategyGranaryProxy))
+        );
+        console2.log(
+            "[Test] 2. Strategy after flashloan redemption (want): ",
+            IERC20(cusdc.underlying()).balanceOf(address(strategyGranaryProxy))
+        );
+        console2.log("[Test] 2. Gain: ", strategyGranaryProxy.getLastGain());
+
+        /* Check balances after compounding */
+        /* Assertions */
+        assertEq(
+            strategyGranaryProxy.getLastGain() > 0,
+            true,
+            "Gain not greater than 0"
+        );
+        assertEq(
+            wethBalance <= weth.balanceOf(address(strategyGranaryProxy)),
+            true,
+            "Lower weth balance than before"
+        );
+        assertEq(
+            wantBalance <= usdc.balanceOf(address(strategyGranaryProxy)),
+            true,
+            "Lower want balance than before"
+        );
+        assertEq(
+            optionsBalance >
+                optionsTokenProxy.balanceOf(address(strategyGranaryProxy)),
+            true,
+            "Lower balance than before"
+        );
+        assertEq(
+            0 == optionsTokenProxy.balanceOf(address(strategyGranaryProxy)),
             true,
             "Options token balance is not 0"
         );
