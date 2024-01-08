@@ -6,8 +6,6 @@
 
 pragma solidity ^0.8.0;
 
-import {console2} from "forge-std/Test.sol";
-
 // Code from https://github.com/smartcontractkit/chainlink/blob/master/evm-contracts/src/v0.6/interfaces/AggregatorV3Interface.sol
 
 interface AggregatorV3Interface {
@@ -2119,7 +2117,6 @@ abstract contract BalMixin is ISwapErrors {
 
         bytes32 poolId = balSwapPoolIDs[_from][_to][_vault];
         require(poolId != bytes32(0), "Missing pool for swap");
-        //console2.log("Prams: ", _from, _to, _amount);
         IBeetVault.SingleSwap memory singleSwap;
         singleSwap.poolId = poolId;
         singleSwap.kind = IBeetVault.SwapKind.GIVEN_IN;
@@ -2138,7 +2135,6 @@ abstract contract BalMixin is ISwapErrors {
             address(this),
             _vault
         );
-        //_fromconsole2.log("Allowance vs amount1: ", currentAllowance, _amount);
         // Linear pool tokens have infinite allowance for the vault by default.
         if (_amount > currentAllowance) {
             IERC20(_from).safeIncreaseAllowance(
@@ -2179,7 +2175,6 @@ abstract contract BalMixin is ISwapErrors {
         bool tokenOutFound;
 
         for (uint256 i = 0; i < poolTokens.length; i++) {
-            //console2.log("Pool tokens returned >>> ", address(poolTokens[i]));
             if (address(poolTokens[i]) == _tokenIn) tokenInFound = true;
             else if (address(poolTokens[i]) == _tokenOut) tokenOutFound = true;
         }

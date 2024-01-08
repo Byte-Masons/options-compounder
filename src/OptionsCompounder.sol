@@ -8,48 +8,38 @@ import {console2} from "forge-std/Test.sol";
 import {IFlashLoanReceiver} from "aave-v2/flashloan//interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
-import {DiscountExerciseParams, DiscountExercise} from "test/mocks/exercise/DiscountExercise.sol"; // temporary path with test relation
-import {IOptionsToken} from "./interfaces/IOptionsToken.sol";
+import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol"; // temporary path with test relation
+import {IOptionsToken} from "optionsToken/src/interfaces/IOptionsToken.sol";
 import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
-import "oz-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
+import "oz-upgradeable/proxy/utils/Initializable.sol";
 
 // import "./helpers/UUPSUpgradeable.sol";
-
-/* Errors */
-error OptionsCompounder__NotOption();
-error OptionsCompounder__TooMuchAssetsLoaned();
-error OptionsCompounder__NotEnoughFunds();
-error OptionsCompounder__NotAStrategy();
-error OptionsCompounder__StrategyNotFound();
-error OptionsCompounder__StrategyAlreadyExists();
-error OptionsCompounder__FlashloanNotProfitable(
-    uint256 fundsAvailable,
-    uint256 fundsToPay
-);
-error OptionsCompounder__AssetNotEqualToPaymentToken();
-error OptionsCompounder__NotFinished();
-error OptionsCompounder__OnlyThreeRolesAllowed();
 
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
 /* Main contract */
-contract OptionsCompounder is
-    IFlashLoanReceiver,
-    AccessControlEnumerableUpgradeable
-{
+abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
+    /* Errors */
+    error OptionsCompounder__NotExerciseContract();
+    error OptionsCompounder__TooMuchAssetsLoaned();
+    error OptionsCompounder__FlashloanNotProfitable();
+    error OptionsCompounder__AssetNotEqualToPaymentToken();
+    error OptionsCompounder__FlashloanNotFinished();
+    error OptionsCompounder__OnlyKeeperAllowed();
+    error OptionsCompounder__OnlyAdminsAllowed();
+    error OptionsCompounder__FlashloanNotTriggered();
+
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
 
     /* Storages */
-    IOptionsToken private optionToken;
     ILendingPoolAddressesProvider private addressProvider;
-    ISwapperSwaps private swapperSwaps;
     ILendingPool private lendingPool;
-    address wantToken;
-    bool flashloanFinished;
+    bool private flashloanFinished;
+    IOptionsToken public optionToken;
     uint256 gain = 0; // TODO: remove at the end
 
     /* Events */
@@ -58,44 +48,55 @@ contract OptionsCompounder is
         uint256 indexed returned
     );
 
+    /* Modifiers */
+    modifier onlyKeeper() {
+        if (
+            _hasRoleForOptionsCompounder(getKeeperRole(), msg.sender) == false
+        ) {
+            revert OptionsCompounder__OnlyKeeperAllowed();
+        }
+        _;
+    }
+
+    modifier onlyAdmins() {
+        bool hasRole = false;
+        bytes32[] memory admins = getAdminRoles();
+        for (uint8 idx = 0; idx < admins.length; idx++) {
+            if (
+                _hasRoleForOptionsCompounder(admins[idx], msg.sender) != false
+            ) {
+                hasRole = true;
+                break;
+            }
+        }
+        if (hasRole == false) {
+            revert OptionsCompounder__OnlyAdminsAllowed();
+        }
+        _;
+    }
+
     /**
      * List of params which are initiated at the begining:
      * @param _optionToken - option token address which allows to redeem underlying token via operation "exercise"
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
-     * @param _reaperSwapper - address to contract allowing to swap tokens in easy way
      * */
     function __OptionsCompounder_init(
         address _optionToken,
-        address _addressProvider,
-        address _reaperSwapper,
-        address _wantToken,
-        address[] memory _multisigRoles
+        address _addressProvider
     ) internal onlyInitializing {
         optionToken = IOptionsToken(_optionToken);
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         lendingPool = ILendingPool(addressProvider.getLendingPool());
-        swapperSwaps = ISwapperSwaps(_reaperSwapper);
-        wantToken = _wantToken;
         flashloanFinished = true;
-        if (_multisigRoles.length != 3) {
-            revert OptionsCompounder__OnlyThreeRolesAllowed();
-        }
-        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[0]);
-        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[1]);
-        _grantRole(DEFAULT_ADMIN_ROLE, _multisigRoles[2]);
     }
 
     /***************************** Setters ***********************************/
     /* Only owner functions - in the future multi level access control*/
-    function setSwapper(
-        address _swapper
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        swapperSwaps = ISwapperSwaps(_swapper);
-    }
-
-    function setOptionToken(
-        address _optionToken
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    /**
+     * @dev Sets option token address. Can be executed only by admins
+     * @param _optionToken - address of option token contract
+     */
+    function setOptionToken(address _optionToken) external onlyAdmins {
         optionToken = IOptionsToken(_optionToken);
     }
 
@@ -106,9 +107,12 @@ contract OptionsCompounder is
         address[] calldata assets,
         uint256[] calldata amounts,
         uint256[] calldata premiums,
-        address initiator,
+        address,
         bytes calldata params
     ) external override returns (bool) {
+        if (flashloanFinished != false) {
+            revert OptionsCompounder__FlashloanNotTriggered();
+        }
         if (
             assets.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
             amounts.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
@@ -128,18 +132,20 @@ contract OptionsCompounder is
     }
 
     /**
-     * @dev function initiate flashloan in order to exercise option tokens and compound rewards
-     * in underlying tokens to want token
+     * @dev Function initiate flashloan in order to exercise option tokens and compound rewards
+     * in underlying tokens to want token. Can be executed only by keeper role.
+     * @param amount - amount of option tokens to exercise
+     * @param exerciseContract - address of exercise contract (DiscountContract)
      */
-    // TODO: Add access control.
-    // Question: Will it be called by the strategy via "harvest" function (so internal func) or
-    // we need heere access control like atLeastRole(KEEPER) ?
-    function harvestOTokens(uint256 amount, address exerciseContract) external {
+    function harvestOTokens(
+        uint256 amount,
+        address exerciseContract
+    ) external onlyKeeper {
         if (optionToken.isExerciseContract(exerciseContract) == false) {
-            revert OptionsCompounder__NotOption();
+            revert OptionsCompounder__NotExerciseContract();
         }
         if (flashloanFinished == false) {
-            revert OptionsCompounder__NotFinished();
+            revert OptionsCompounder__FlashloanNotFinished();
         }
         console2.log(
             "Balance in this contract: ",
@@ -155,7 +161,9 @@ contract OptionsCompounder is
         assets[0] = address(paymentToken);
 
         uint256[] memory amounts = new uint256[](1);
-        amounts[0] = optionToken.getPaymentAmount(amount, exerciseContract);
+        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(
+            amount
+        );
 
         // 0 = no debt, 1 = stable, 2 = variable
         uint256[] memory modes = new uint256[](2);
@@ -166,7 +174,7 @@ contract OptionsCompounder is
             exerciseContract,
             initialBalance
         );
-
+        flashloanFinished = false;
         lendingPool.flashLoan(
             receiverAddress,
             assets,
@@ -176,25 +184,31 @@ contract OptionsCompounder is
             params,
             referralCode
         );
-        flashloanFinished = false;
     }
 
-    /** @dev private function that helps to execute flashloan and makes it more modular */
+    /** @dev Private function that helps to execute flashloan and makes it more modular
+     *  @return gainInWantToken - gain from the option exercise after repayment of all debt from flashloan
+     */
     function exerciseOptionAndReturnDebt(
         address asset,
         uint256 amount,
         uint256 premium,
         bytes calldata params
     ) private returns (uint256) {
-        (uint256 optionsAmount, address option, uint256 initialBalance) = abi
-            .decode(params, (uint256, address, uint256));
+        (
+            uint256 optionsAmount,
+            address exerciserContract,
+            uint256 initialBalance
+        ) = abi.decode(params, (uint256, address, uint256));
 
         uint256 gainInPaymentToken = 0;
         uint256 gainInWantToken = 0;
         /* Get underlying and payment tokens again to make sure there is no change between 
         harvest and excersice */
-        ERC20 underlyingToken = DiscountExercise(option).underlyingToken();
-        IERC20 paymentToken = DiscountExercise(option).paymentToken();
+        IERC20 underlyingToken = DiscountExercise(exerciserContract)
+            .underlyingToken();
+        IERC20 paymentToken = DiscountExercise(exerciserContract)
+            .paymentToken();
         /* Asset and paymentToken should be the same addresses */
         if (asset != address(paymentToken)) {
             revert OptionsCompounder__AssetNotEqualToPaymentToken();
@@ -217,11 +231,11 @@ contract OptionsCompounder is
         );
 
         /* Approve spending option token and exercise in order to get underlying token */
-        paymentToken.approve(option, amount);
+        paymentToken.approve(exerciserContract, amount);
         optionToken.exercise(
             optionsAmount,
             address(this),
-            option,
+            exerciserContract,
             exerciseParams
         );
 
@@ -247,16 +261,13 @@ contract OptionsCompounder is
         );
 
         /* Approve the underlying token to make swap */
-        underlyingToken.approve(
-            address(swapperSwaps),
-            balanceOfUnderlyingToken
-        );
+        underlyingToken.approve(swapperSwaps(), balanceOfUnderlyingToken);
         /* Swap underlying token to payment token (asset) */
         // Question: Here is some room for optimization. Instead of swapping all underlying tokens
         // to payment tokens, we can swap necessary amount of payment tokens (totalAmount) and the rest
         // underlying tokens can be swapped to the want token but swapper doesn't allow to put
         // here amountOut (it is amountIn acceptable for swapBal). Is it worth to play with this ?
-        swapperSwaps.swapBal(
+        ISwapperSwaps(swapperSwaps()).swapBal(
             address(underlyingToken),
             asset,
             balanceOfUnderlyingToken,
@@ -271,40 +282,38 @@ contract OptionsCompounder is
         );
         console2.log(
             "2.Balance of wantToken: ",
-            IERC20(wantToken).balanceOf(address(this))
+            IERC20(wantToken()).balanceOf(address(this))
         );
         console2.log(
             "2.Balance of paymentToken: ",
             paymentToken.balanceOf(address(this))
         );
+        console2.log("2.Initial Balance of paymentToken: ", initialBalance);
 
         /* Calculate profit and revert if it is not profitable */
         uint256 assetBalance = paymentToken.balanceOf(address(this));
 
         if ((assetBalance - initialBalance) <= totalAmount) {
-            revert OptionsCompounder__FlashloanNotProfitable(
-                (assetBalance - initialBalance),
-                totalAmount
-            );
+            revert OptionsCompounder__FlashloanNotProfitable();
         }
         /* Protected by statement above */
         gainInPaymentToken = (assetBalance - initialBalance) - totalAmount;
 
         /* Approve the underlying token to make swap */
-        IERC20(asset).approve(address(swapperSwaps), gainInPaymentToken);
+        IERC20(asset).approve(swapperSwaps(), gainInPaymentToken);
 
         /* Get strategies want token */
-        if (wantToken != asset) {
-            swapperSwaps.swapBal(
+        if (wantToken() != asset) {
+            ISwapperSwaps(swapperSwaps()).swapBal(
                 asset,
-                wantToken,
+                wantToken(),
                 gainInPaymentToken,
                 minAmountOutData,
                 BEETX_VAULT_OP
             );
         }
 
-        gainInWantToken = IERC20(wantToken).balanceOf(address(this));
+        gainInWantToken = IERC20(wantToken()).balanceOf(address(this));
 
         /* Approve lending pool to spend borrowed tokens + premium */
         IERC20(asset).approve(address(lendingPool), totalAmount);
@@ -342,29 +351,22 @@ contract OptionsCompounder is
         return lendingPool;
     }
 
-    // Question: Shall we use reaper access control somehow in this contract ?
-    // /**
-    //  * @dev Returns an array of all the relevant roles arranged in descending order of privilege.
-    //  *      Subclasses should override this to specify their unique roles arranged in the correct
-    //  *      order, for example, [SUPER-ADMIN, ADMIN, GUARDIAN, STRATEGIST].
-    //  */
-    // function _cascadingAccessRoles()
-    //     internal
-    //     pure
-    //     override
-    //     returns (bytes32[] memory)
-    // {
-    //     bytes32[] memory cascadingAccessRoles = new bytes32[](5);
-    //     cascadingAccessRoles[0] = DEFAULT_ADMIN_ROLE;
-    //     cascadingAccessRoles[1] = ADMIN;
-    //     cascadingAccessRoles[2] = GUARDIAN;
-    //     return cascadingAccessRoles;
-    // }
+    /* Virtual functions */
+    function wantToken() internal view virtual returns (address);
 
-    // function _hasRole(
-    //     bytes32 _role,
-    //     address _account
-    // ) internal view override returns (bool) {
-    //     return hasRole(_role, _account);
-    // }
+    function swapperSwaps() internal view virtual returns (address);
+
+    /**
+     * @dev Returns an array of all the relevant roles arranged in descending order of privilege.
+     *      Subclasses should override this to specify their unique roles arranged in the correct
+     *      order, for example, [SUPER-ADMIN, ADMIN, GUARDIAN, STRATEGIST].
+     */
+    function _hasRoleForOptionsCompounder(
+        bytes32 _role,
+        address _account
+    ) internal view virtual returns (bool);
+
+    function getKeeperRole() internal pure virtual returns (bytes32);
+
+    function getAdminRoles() internal pure virtual returns (bytes32[] memory);
 }
