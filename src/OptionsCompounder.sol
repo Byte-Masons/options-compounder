@@ -293,6 +293,11 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         /* Calculate profit and revert if it is not profitable */
         uint256 assetBalance = paymentToken.balanceOf(address(this));
 
+        console2.log(
+            "2. Delta if Payment tokens: ",
+            (assetBalance - initialBalance)
+        );
+        console2.log("2. Total amount ot pay: ", (totalAmount));
         if ((assetBalance - initialBalance) <= totalAmount) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
