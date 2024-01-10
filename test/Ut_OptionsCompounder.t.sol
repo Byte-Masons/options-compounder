@@ -239,8 +239,19 @@ contract OptionsTokenTest is Test {
         // console2.log("Address of token admin: ", tokenAdmin);
     }
 
+    function fixture_convertion(
+        uint256 value,
+        uint256 divider,
+        uint256 multiplier
+    ) public pure returns (uint256) {
+        return
+            (value >= divider)
+                ? (value / divider) * multiplier
+                : (value * multiplier) / divider;
+    }
+
     function test_utFlashloanPositiveScenario(
-        uint256 paymentAmount,
+        uint256 paymentAmountToMint,
         uint256 initialPaymentBalance,
         uint256 paymentBalanceAfterSwap,
         uint256 underlyingAmount,
@@ -250,32 +261,41 @@ contract OptionsTokenTest is Test {
         uint256 factor = 5000; // < PERCENTAGE
         uint256 premium = 100;
         /* Test vectors definition */
-        initialPaymentBalance = bound(initialPaymentBalance, 0, 1 ether);
+        /* Payment token amount which is transfered at init and imitates initial balance of the strategy before flashloan compound */
+        initialPaymentBalance = 0; // bound(initialPaymentBalance, 0, 1 ether);
         console2.log("Initial Payment amount: ", initialPaymentBalance);
-        vm.assume(
-            paymentAmount > (initialPaymentBalance + premium) &&
-                paymentAmount < (UINT256_MAX / PERCENTAGE) * factor
-        );
-        assertGt(paymentAmount, (initialPaymentBalance + premium));
-        console2.log("Payment amount: ", paymentAmount);
 
-        uint256 paymentAmountToSwap = (paymentAmount - initialPaymentBalance) >=
-            factor
-            ? ((paymentAmount - initialPaymentBalance) / factor) * PERCENTAGE
-            : ((paymentAmount - initialPaymentBalance) * PERCENTAGE) / factor;
-        console2.log("Payment amount to swap: ", paymentAmountToSwap);
-        uint256 calcOToken = (oTokensAmount >= PERCENTAGE)
-            ? ((oTokensAmount / PERCENTAGE) * factor)
-            : ((oTokensAmount * factor) / PERCENTAGE);
-        console2.log("Calculated otokens ", calcOToken);
-        vm.assume(oTokensAmount <= paymentAmountToSwap && calcOToken > 0);
-        console2.log("OToken amount: ", oTokensAmount);
+        /* Payment token amount to mint at init - must be greater than all required tokens (initial amount + amount transferred after swap) 
+        Cannot be higher than (UINT256_MAX / PERCENTAGE) - 11.5e54 ETH */
         vm.assume(
-            paymentBalanceAfterSwap > (premium + calcOToken) &&
-                paymentBalanceAfterSwap <
-                (paymentAmount - initialPaymentBalance)
+            paymentAmountToMint > (initialPaymentBalance + premium) &&
+                paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
         );
-        console2.log("Payment amount after swap: ", paymentBalanceAfterSwap);
+        console2.log("Payment amount: ", paymentAmountToMint);
+
+        /* Maximum amount of OTokens possible to simlate assuming minted and initial amount of payment token */
+        uint256 maxAmountOfOTokens = ((paymentAmountToMint -
+            initialPaymentBalance) * PERCENTAGE) / factor;
+        console2.log(
+            "Maximum amount of OTokens possible: ",
+            maxAmountOfOTokens
+        );
+        vm.assume(oTokensAmount <= maxAmountOfOTokens);
+        console2.log("OToken amount: ", oTokensAmount);
+
+        /* Payment balance after swap shall be greater than borrowed asset + premium and less than minted asset - initial balance */
+        uint256 borrowedAssetBalance = (oTokensAmount * factor) / PERCENTAGE;
+        vm.assume(
+            paymentBalanceAfterSwap > (premium + borrowedAssetBalance) &&
+                paymentBalanceAfterSwap <
+                (paymentAmountToMint - initialPaymentBalance)
+        );
+        console2.log("Borrowed Asset Amount: ", paymentBalanceAfterSwap);
+        vm.assume(
+            paymentAmountToMint >
+                paymentBalanceAfterSwap + initialPaymentBalance
+        );
+        console2.log("Adjusted payment amount: ", paymentAmountToMint);
 
         uint256 targetLTV = 0.0001 ether;
         /* prepare option tokens - distribute them to the specified strategy 
@@ -299,11 +319,12 @@ contract OptionsTokenTest is Test {
         console2.log("Initialization proxied sonne strategy");
         strategySonneProxy = ReaperStrategySonne(address(tmpProxy));
         UtMock utMock = new UtMock(
-            paymentAmount,
+            paymentAmountToMint,
             initialPaymentBalance,
             paymentBalanceAfterSwap,
             underlyingAmount,
             wantAmount,
+            oTokensAmount,
             premium,
             address(strategySonneProxy)
         );

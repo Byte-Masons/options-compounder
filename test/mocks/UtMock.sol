@@ -18,6 +18,7 @@ contract UtMock {
     uint256 public nrOfCallsExercise;
     uint256 public nrOfCallsFlashloan;
     uint256 public premium;
+    uint256 public oTokensAmount;
     uint256 factor = 5000; // 0 - 10_000
 
     constructor(
@@ -26,6 +27,7 @@ contract UtMock {
         uint256 _paymentBalanceAfterSwap,
         uint256 _underlyingAmount,
         uint256 _wantAmount,
+        uint256 _oTokensAmount,
         uint256 _premium,
         address _strategyAddress
     ) {
@@ -40,6 +42,7 @@ contract UtMock {
         mockedPaymentToken.transfer(_strategyAddress, _initialPaymentBalance);
         mockedUnderlyingToken.mint(_underlyingAmount);
         mockedUnderlyingWant.mint(_wantAmount);
+        oTokensAmount = _oTokensAmount;
         strategy = ReaperStrategySonne(_strategyAddress);
         premium = _premium;
         paymentBalanceAfterSwap = _paymentBalanceAfterSwap;
@@ -133,6 +136,6 @@ contract UtMock {
     }
 
     function balanceOf(address account) external view returns (uint256) {
-        return 123;
+        return oTokensAmount;
     }
 }

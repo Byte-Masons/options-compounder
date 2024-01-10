@@ -319,7 +319,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         }
 
         gainInWantToken = IERC20(wantToken()).balanceOf(address(this));
-
+        if (gainInWantToken == 0) {
+            revert OptionsCompounder__FlashloanNotProfitable();
+        }
         /* Approve lending pool to spend borrowed tokens + premium */
         IERC20(asset).approve(address(lendingPool), totalAmount);
 
