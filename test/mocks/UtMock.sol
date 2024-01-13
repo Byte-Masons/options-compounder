@@ -2,15 +2,14 @@
 
 pragma solidity ^0.8.0;
 
-import "forge-std/Test.sol";
 import {MintableERC20} from "./MintableERC20.sol";
 import {MinAmountOutData} from "../../src/interfaces/ISwapper.sol";
 import {ReaperStrategySonne} from "../strategies/ReaperStrategySonne.sol";
 
 contract UtMock {
-    MintableERC20 mockedPaymentToken;
-    MintableERC20 mockedUnderlyingToken;
-    MintableERC20 mockedUnderlyingWant;
+    MintableERC20 public mockedPaymentToken;
+    MintableERC20 public mockedUnderlyingToken;
+    MintableERC20 public mockedUnderlyingWant;
     ReaperStrategySonne strategy;
 
     uint256 paymentBalanceAfterSwap;
@@ -19,17 +18,17 @@ contract UtMock {
     uint256 public nrOfCallsFlashloan;
     uint256 public premium;
     uint256 public oTokensAmount;
-    uint256 factor = 5000; // 0 - 10_000
+    uint256 factor; // 0 - 10_000
 
     constructor(
         uint256 _paymentAmount,
         uint256 _initialPaymentBalance,
         uint256 _paymentBalanceAfterSwap,
-        uint256 _underlyingAmount,
         uint256 _wantAmount,
         uint256 _oTokensAmount,
         uint256 _premium,
-        address _strategyAddress
+        address _strategyAddress,
+        uint256 _factor
     ) {
         require(
             _paymentAmount >= _initialPaymentBalance,
@@ -40,12 +39,12 @@ contract UtMock {
         mockedUnderlyingWant = new MintableERC20("Underlying Want", "UW");
         mockedPaymentToken.mint(_paymentAmount);
         mockedPaymentToken.transfer(_strategyAddress, _initialPaymentBalance);
-        mockedUnderlyingToken.mint(_underlyingAmount);
         mockedUnderlyingWant.mint(_wantAmount);
         oTokensAmount = _oTokensAmount;
         strategy = ReaperStrategySonne(_strategyAddress);
         premium = _premium;
         paymentBalanceAfterSwap = _paymentBalanceAfterSwap;
+        factor = _factor;
     }
 
     function underlyingToken() external view returns (address) {
@@ -72,6 +71,11 @@ contract UtMock {
             mockedPaymentToken.transfer(
                 address(strategy),
                 paymentBalanceAfterSwap
+            );
+        } else if (_to == address(mockedUnderlyingWant)) {
+            mockedUnderlyingWant.transfer(
+                address(strategy),
+                mockedUnderlyingWant.balanceOf(address(this))
             );
         }
         return 0;
@@ -114,8 +118,6 @@ contract UtMock {
         uint256[] memory premiums = new uint256[](1);
         premiums[0] = premium;
         nrOfCallsFlashloan++;
-        //console2.log("Transfering payment tokens ", amounts[0]);
-        //mockedPaymentToken.transfer(address(strategy), amounts[0]);
         strategy.executeOperation(
             assets,
             amounts,
