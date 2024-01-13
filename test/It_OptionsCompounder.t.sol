@@ -24,6 +24,7 @@ import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperS
 contract OptionsTokenTest is Test {
     using FixedPointMathLib for uint256;
     /* Constants */
+    uint256 constant FORK_BLOCK = 114768697;
     uint256 constant NON_ZERO_PROFIT = 1;
     uint16 constant PRICE_MULTIPLIER = 5000; // 0.5
     uint56 constant ORACLE_SECS = 30 minutes;
@@ -118,7 +119,7 @@ contract OptionsTokenTest is Test {
         vm.deal(owner, AMOUNT * 3);
 
         /* setup network */
-        uint256 optimismFork = vm.createFork(OPTIMISM_MAINNET_URL);
+        uint256 optimismFork = vm.createFork(OPTIMISM_MAINNET_URL, FORK_BLOCK);
         vm.selectFork(optimismFork);
 
         /* Variables */
