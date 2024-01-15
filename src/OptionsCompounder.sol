@@ -140,7 +140,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     function harvestOTokens(
         uint256 amount,
         address exerciseContract,
-        uint256 minAmountOfWant
+        uint256 minWantAmount
     ) external onlyKeeper {
         if (optionToken.isExerciseContract(exerciseContract) == false) {
             revert OptionsCompounder__NotExerciseContract();
@@ -174,7 +174,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             amount,
             exerciseContract,
             initialBalance,
-            minAmountOfWant
+            minWantAmount
         );
         flashloanFinished = false;
         lendingPool.flashLoan(
@@ -201,7 +201,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             uint256 optionsAmount,
             address exerciserContract,
             uint256 initialBalance,
-            uint256 minAmountOfWant
+            uint256 minWantAmount
         ) = abi.decode(params, (uint256, address, uint256, uint256));
 
         uint256 gainInPaymentToken = 0;
@@ -322,7 +322,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         }
 
         gainInWantToken = IERC20(wantToken()).balanceOf(address(this));
-        if (gainInWantToken < minAmountOfWant) {
+        if (gainInWantToken < minWantAmount) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
         /* Approve lending pool to spend borrowed tokens + premium */
