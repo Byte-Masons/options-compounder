@@ -24,6 +24,8 @@ import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperS
 contract OptionsTokenTest is Test {
     using FixedPointMathLib for uint256;
     /* Constants */
+    uint256 constant FORK_BLOCK = 114768697;
+    uint256 constant NON_ZERO_PROFIT = 1;
     uint16 constant PRICE_MULTIPLIER = 5000; // 0.5
     uint56 constant ORACLE_SECS = 30 minutes;
     uint56 constant ORACLE_AGO = 2 minutes;
@@ -117,7 +119,7 @@ contract OptionsTokenTest is Test {
         vm.deal(owner, AMOUNT * 3);
 
         /* setup network */
-        uint256 optimismFork = vm.createFork(OPTIMISM_MAINNET_URL);
+        uint256 optimismFork = vm.createFork(OPTIMISM_MAINNET_URL, FORK_BLOCK);
         vm.selectFork(optimismFork);
 
         /* Variables */
@@ -295,7 +297,11 @@ contract OptionsTokenTest is Test {
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__OnlyKeeperAllowed()"))
         );
-        strategySonneProxy.harvestOTokens(amount, address(exerciser));
+        strategySonneProxy.harvestOTokens(
+            amount,
+            address(exerciser),
+            NON_ZERO_PROFIT
+        );
 
         /* Hacker tries to manipulate contract configuration */
         vm.expectRevert(
@@ -338,7 +344,11 @@ contract OptionsTokenTest is Test {
 
         vm.startPrank(keeper);
         /* already approved in fixture_prepareOptionToken */
-        strategySonneProxy.harvestOTokens(amount, address(exerciser));
+        strategySonneProxy.harvestOTokens(
+            amount,
+            address(exerciser),
+            NON_ZERO_PROFIT
+        );
         vm.stopPrank();
 
         // temporary logs
@@ -409,7 +419,11 @@ contract OptionsTokenTest is Test {
 
         vm.startPrank(keeper);
         /* already approved in fixture_prepareOptionToken */
-        strategyGranaryProxy.harvestOTokens(amount, address(exerciser));
+        strategyGranaryProxy.harvestOTokens(
+            amount,
+            address(exerciser),
+            NON_ZERO_PROFIT
+        );
         vm.stopPrank();
 
         // temporary logs
@@ -453,7 +467,9 @@ contract OptionsTokenTest is Test {
         );
     }
 
-    function test_flashloanNegativeScenario(uint256 amount) public {
+    function test_flashloanNegativeScenario_highTwapValueAndMultiplier(
+        uint256 amount
+    ) public {
         /* Test vectors definition */
         amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
 
@@ -489,7 +505,58 @@ contract OptionsTokenTest is Test {
         );
 
         vm.startPrank(keeper);
-        strategySonneProxy.harvestOTokens(amount, address(exerciser));
+        strategySonneProxy.harvestOTokens(
+            amount,
+            address(exerciser),
+            NON_ZERO_PROFIT
+        );
+        vm.stopPrank();
+    }
+
+    function test_flashloanNegativeScenario_tooHighMinAmounOfWantExpected(
+        uint256 amount,
+        uint256 minAmountOfWant
+    ) public {
+        /* Test vectors definition */
+        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+        /* Too high expectation of profit - together with high exerciser multiplier makes flashloan not profitable */
+        minAmountOfWant = bound(minAmountOfWant, 1e19, UINT256_MAX);
+
+        /* Prepare option tokens - distribute them to the specified strategy
+        and approve for spending */
+        fixture_prepareOptionToken(amount, address(strategySonneProxy));
+
+        /* Decrease option discount in order to make redemption not profitable */
+        /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
+        vm.startPrank(owner);
+        exerciser.setMultiplier(9000);
+        vm.stopPrank();
+
+        /* Check balances before compounding */
+        uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
+
+        // temporary logs
+        console2.log(
+            "[Test] 1. Strategy before flashloan redemption (weth): ",
+            wethBalance
+        );
+        console2.log(
+            "[Test] 1. Strategy before flashloan redemption (want): ",
+            IERC20(cusdc.underlying()).balanceOf(address(strategySonneProxy))
+        );
+
+        /* Already approved in fixture_prepareOptionToken */
+        /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
+        );
+
+        vm.startPrank(keeper);
+        strategySonneProxy.harvestOTokens(
+            amount,
+            address(exerciser),
+            minAmountOfWant
+        );
         vm.stopPrank();
     }
 
@@ -540,7 +607,11 @@ contract OptionsTokenTest is Test {
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__NotExerciseContract()"))
         );
-        strategySonneProxy.harvestOTokens(amount, fuzzedExerciser);
+        strategySonneProxy.harvestOTokens(
+            amount,
+            fuzzedExerciser,
+            NON_ZERO_PROFIT
+        );
         vm.stopPrank();
     }
 }

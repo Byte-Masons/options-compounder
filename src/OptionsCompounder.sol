@@ -139,7 +139,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      */
     function harvestOTokens(
         uint256 amount,
-        address exerciseContract
+        address exerciseContract,
+        uint256 minWantAmount
     ) external onlyKeeper {
         if (optionToken.isExerciseContract(exerciseContract) == false) {
             revert OptionsCompounder__NotExerciseContract();
@@ -172,7 +173,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         bytes memory params = abi.encode(
             amount,
             exerciseContract,
-            initialBalance
+            initialBalance,
+            minWantAmount
         );
         flashloanFinished = false;
         lendingPool.flashLoan(
@@ -198,8 +200,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         (
             uint256 optionsAmount,
             address exerciserContract,
-            uint256 initialBalance
-        ) = abi.decode(params, (uint256, address, uint256));
+            uint256 initialBalance,
+            uint256 minWantAmount
+        ) = abi.decode(params, (uint256, address, uint256, uint256));
 
         uint256 gainInPaymentToken = 0;
         uint256 gainInWantToken = 0;
@@ -293,6 +296,11 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         /* Calculate profit and revert if it is not profitable */
         uint256 assetBalance = paymentToken.balanceOf(address(this));
 
+        console2.log(
+            "2. Delta in Payment tokens: ",
+            (assetBalance - initialBalance)
+        );
+        console2.log("2. Total amount ot pay: ", (totalAmount));
         if ((assetBalance - initialBalance) <= totalAmount) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
@@ -314,7 +322,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         }
 
         gainInWantToken = IERC20(wantToken()).balanceOf(address(this));
-
+        if (gainInWantToken < minWantAmount) {
+            revert OptionsCompounder__FlashloanNotProfitable();
+        }
         /* Approve lending pool to spend borrowed tokens + premium */
         IERC20(asset).approve(address(lendingPool), totalAmount);
 
