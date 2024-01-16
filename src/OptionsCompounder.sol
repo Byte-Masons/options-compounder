@@ -1,26 +1,27 @@
-//SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 
 pragma solidity ^0.8.0;
 
 /* Imports */
-import {console2} from "forge-std/Test.sol";
-
 import {IFlashLoanReceiver} from "aave-v2/flashloan//interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
-import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol"; // temporary path with test relation
+import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
 import {IOptionsToken} from "optionsToken/src/interfaces/IOptionsToken.sol";
 import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
-import "oz-upgradeable/proxy/utils/Initializable.sol";
+import {Initializable} from "oz-upgradeable/proxy/utils/Initializable.sol";
 
-// import "./helpers/UUPSUpgradeable.sol";
-
+/* Externals */
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
-/* Main contract */
+/**
+ * @title Consumes options tokens, exercise them with flashloaned asset and converts gain to strategy want token
+ * @author Eidolon, xRave110
+ * @dev Abstract contract which shall be inherited by the strategy
+ */
 abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     /* Errors */
     error OptionsCompounder__NotExerciseContract();
@@ -40,7 +41,6 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     ILendingPool private lendingPool;
     bool private flashloanFinished;
     IOptionsToken public optionToken;
-    uint256 gain = 0; // TODO: remove at the end
 
     /* Events */
     event OTokenCompounded(
@@ -50,9 +50,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
     /* Modifiers */
     modifier onlyKeeper() {
-        if (
-            _hasRoleForOptionsCompounder(getKeeperRole(), msg.sender) == false
-        ) {
+        if (hasRoleForOptionsCompounder(getKeeperRole(), msg.sender) == false) {
             revert OptionsCompounder__OnlyKeeperAllowed();
         }
         _;
@@ -62,9 +60,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         bool hasRole = false;
         bytes32[] memory admins = getAdminRoles();
         for (uint8 idx = 0; idx < admins.length; idx++) {
-            if (
-                _hasRoleForOptionsCompounder(admins[idx], msg.sender) != false
-            ) {
+            if (hasRoleForOptionsCompounder(admins[idx], msg.sender) != false) {
                 hasRole = true;
                 break;
             }
@@ -76,7 +72,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     }
 
     /**
-     * List of params which are initiated at the begining:
+     * @notice Initializes params
+     * @dev Replaces constructor due to upgradeable nature of the contract. Can be executed only once at init.
      * @param _optionToken - option token address which allows to redeem underlying token via operation "exercise"
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
      * */
@@ -91,9 +88,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     }
 
     /***************************** Setters ***********************************/
-    /* Only owner functions - in the future multi level access control*/
     /**
-     * @dev Sets option token address. Can be executed only by admins
+     * @notice Sets option token address
+     * @dev Can be executed only by admins
      * @param _optionToken - address of option token contract
      */
     function setOptionToken(address _optionToken) external onlyAdmins {
@@ -101,7 +98,72 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     }
 
     /**
-        @dev This function is called after your contract has received the flash loaned amount
+     * @notice Function initiates flashloan to get assets for exercising options.
+     * @dev Can be executed only by keeper role. Reentrance protected.
+     * @param amount - amount of option tokens to exercise
+     * @param exerciseContract - address of exercise contract (DiscountContract)
+     * @param minWantAmount - minimal amount of want when the flashloan is considered as profitable
+     */
+    function harvestOTokens(
+        uint256 amount,
+        address exerciseContract,
+        uint256 minWantAmount
+    ) external onlyKeeper {
+        /* Check exercise contract validity */
+        if (optionToken.isExerciseContract(exerciseContract) == false) {
+            revert OptionsCompounder__NotExerciseContract();
+        }
+        /* Reentrance protection */
+        if (flashloanFinished == false) {
+            revert OptionsCompounder__FlashloanNotFinished();
+        }
+        /* Locals */
+        IERC20 paymentToken = DiscountExercise(exerciseContract).paymentToken();
+        address receiverAddress = address(this);
+        address onBehalfOf = address(this);
+        uint16 referralCode = 0;
+        uint256 initialBalance = paymentToken.balanceOf(address(this));
+
+        address[] memory assets = new address[](1);
+        assets[0] = address(paymentToken);
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(
+            amount
+        );
+
+        // 0 = no debt, 1 = stable, 2 = variable
+        uint256[] memory modes = new uint256[](2);
+        modes[0] = 0;
+
+        /* necesary params used during flashloan execution */
+        bytes memory params = abi.encode(
+            amount,
+            exerciseContract,
+            initialBalance,
+            minWantAmount
+        );
+        flashloanFinished = false;
+
+        lendingPool.flashLoan(
+            receiverAddress,
+            assets,
+            amounts,
+            modes,
+            onBehalfOf,
+            params,
+            referralCode
+        );
+    }
+
+    /**
+     *  @notice Exercise option tokens with flash loaned token and compound rewards
+     *  in underlying tokens to stratefy want token
+     *  @dev Function is called after this contract has received the flash loaned amount
+     *  @param assets - list of assets flash loaned (only one asset allowed in this case)
+     *  @param amounts - list of amounts flash loaned (only one amount allowed in this case)
+     *  @param premiums - list of premiums for flash loaned assets (only one premium allowed in this case)
+     *  @param params - encoded data about options amount, exercise contract address, initial balance and minimal want amount
      */
     function executeOperation(
         address[] calldata assets,
@@ -121,82 +183,21 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             revert OptionsCompounder__TooMuchAssetsLoaned();
         }
         /* Later the gain can be local variable */
-        gain = exerciseOptionAndReturnDebt(
-            assets[0],
-            amounts[0],
-            premiums[0],
-            params
-        );
+        exerciseOptionAndReturnDebt(assets[0], amounts[0], premiums[0], params);
         flashloanFinished = true;
         return true;
     }
 
-    /**
-     * @dev Function initiate flashloan in order to exercise option tokens and compound rewards
-     * in underlying tokens to want token. Can be executed only by keeper role.
-     * @param amount - amount of option tokens to exercise
-     * @param exerciseContract - address of exercise contract (DiscountContract)
-     */
-    function harvestOTokens(
-        uint256 amount,
-        address exerciseContract,
-        uint256 minWantAmount
-    ) external onlyKeeper {
-        if (optionToken.isExerciseContract(exerciseContract) == false) {
-            revert OptionsCompounder__NotExerciseContract();
-        }
-        if (flashloanFinished == false) {
-            revert OptionsCompounder__FlashloanNotFinished();
-        }
-        console2.log(
-            "Balance in this contract: ",
-            IERC20(address(optionToken)).balanceOf(address(this))
-        );
-        IERC20 paymentToken = DiscountExercise(exerciseContract).paymentToken();
-        address receiverAddress = address(this);
-        address onBehalfOf = address(this);
-        uint16 referralCode = 0;
-        uint256 initialBalance = paymentToken.balanceOf(address(this));
-
-        address[] memory assets = new address[](1);
-        assets[0] = address(paymentToken);
-
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(
-            amount
-        );
-
-        // 0 = no debt, 1 = stable, 2 = variable
-        uint256[] memory modes = new uint256[](2);
-        modes[0] = 0;
-
-        bytes memory params = abi.encode(
-            amount,
-            exerciseContract,
-            initialBalance,
-            minWantAmount
-        );
-        flashloanFinished = false;
-        lendingPool.flashLoan(
-            receiverAddress,
-            assets,
-            amounts,
-            modes,
-            onBehalfOf,
-            params,
-            referralCode
-        );
-    }
-
     /** @dev Private function that helps to execute flashloan and makes it more modular
-     *  @return gainInWantToken - gain from the option exercise after repayment of all debt from flashloan
+     * Emits event with gain from the option exercise after repayment of all debt from flashloan
+     * and amount of repaid assets
      */
     function exerciseOptionAndReturnDebt(
         address asset,
         uint256 amount,
         uint256 premium,
         bytes calldata params
-    ) private returns (uint256) {
+    ) private {
         (
             uint256 optionsAmount,
             address exerciserContract,
@@ -205,13 +206,22 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         ) = abi.decode(params, (uint256, address, uint256, uint256));
 
         uint256 gainInPaymentToken = 0;
+        uint256 totalAmountToPay = amount + premium;
         uint256 gainInWantToken = 0;
+        uint256 balanceOfUnderlyingToken = 0;
+        uint256 assetBalance = 0;
+        MinAmountOutData memory minAmountOutData = MinAmountOutData(
+            MinAmountOutKind.Absolute,
+            0 // could use the oracle to set a min price from the options token
+        );
+
         /* Get underlying and payment tokens again to make sure there is no change between 
         harvest and excersice */
         IERC20 underlyingToken = DiscountExercise(exerciserContract)
             .underlyingToken();
         IERC20 paymentToken = DiscountExercise(exerciserContract)
             .paymentToken();
+
         /* Asset and paymentToken should be the same addresses */
         if (asset != address(paymentToken)) {
             revert OptionsCompounder__AssetNotEqualToPaymentToken();
@@ -223,53 +233,21 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             })
         );
 
-        // temporary logs
-        console2.log(
-            "[Before] BalanceOfPaymentToken: ",
-            paymentToken.balanceOf(address(this))
-        );
-        console2.log(
-            "[Before] BalanceOfOptionToken: ",
-            IERC20(address(optionToken)).balanceOf(address(this))
-        );
-
-        /* Approve spending option token and exercise in order to get underlying token */
+        /* Approve spending option token */
         paymentToken.approve(exerciserContract, amount);
+        /* Exercise in order to get underlying token */
         optionToken.exercise(
             optionsAmount,
             address(this),
             exerciserContract,
             exerciseParams
         );
-
-        // temporary logs
-        console2.log(
-            "[After] BalanceOfPaymentToken: ",
-            paymentToken.balanceOf(address(this))
-        );
-        console2.log(
-            "[After] BalanceOfOptionToken: ",
-            IERC20(address(optionToken)).balanceOf(address(this))
-        );
-        uint256 balanceOfUnderlyingToken = underlyingToken.balanceOf(
-            address(this)
-        );
-        console2.log("[After] BalanceOfOATHToken: ", balanceOfUnderlyingToken);
-
-        /* Calculate total amount to return */
-        uint256 totalAmount = amount + premium;
-        MinAmountOutData memory minAmountOutData = MinAmountOutData(
-            MinAmountOutKind.Absolute,
-            0 // could use the oracle to set a min price from the options token
-        );
+        balanceOfUnderlyingToken = underlyingToken.balanceOf(address(this));
 
         /* Approve the underlying token to make swap */
         underlyingToken.approve(swapperSwaps(), balanceOfUnderlyingToken);
+
         /* Swap underlying token to payment token (asset) */
-        // Question: Here is some room for optimization. Instead of swapping all underlying tokens
-        // to payment tokens, we can swap necessary amount of payment tokens (totalAmount) and the rest
-        // underlying tokens can be swapped to the want token but swapper doesn't allow to put
-        // here amountOut (it is amountIn acceptable for swapBal). Is it worth to play with this ?
         ISwapperSwaps(swapperSwaps()).swapBal(
             address(underlyingToken),
             asset,
@@ -278,34 +256,14 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             BEETX_VAULT_OP
         );
 
-        /* Console log area - temporary */
-        console2.log(
-            "2.Balance of underlyingToken: ",
-            underlyingToken.balanceOf(address(this))
-        );
-        console2.log(
-            "2.Balance of wantToken: ",
-            IERC20(wantToken()).balanceOf(address(this))
-        );
-        console2.log(
-            "2.Balance of paymentToken: ",
-            paymentToken.balanceOf(address(this))
-        );
-        console2.log("2.Initial Balance of paymentToken: ", initialBalance);
-
         /* Calculate profit and revert if it is not profitable */
-        uint256 assetBalance = paymentToken.balanceOf(address(this));
+        assetBalance = paymentToken.balanceOf(address(this));
 
-        console2.log(
-            "2. Delta in Payment tokens: ",
-            (assetBalance - initialBalance)
-        );
-        console2.log("2. Total amount ot pay: ", (totalAmount));
-        if ((assetBalance - initialBalance) <= totalAmount) {
+        if ((assetBalance - initialBalance) <= totalAmountToPay) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
         /* Protected by statement above */
-        gainInPaymentToken = (assetBalance - initialBalance) - totalAmount;
+        gainInPaymentToken = (assetBalance - initialBalance) - totalAmountToPay;
 
         /* Approve the underlying token to make swap */
         IERC20(asset).approve(swapperSwaps(), gainInPaymentToken);
@@ -326,29 +284,12 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
         /* Approve lending pool to spend borrowed tokens + premium */
-        IERC20(asset).approve(address(lendingPool), totalAmount);
+        IERC20(asset).approve(address(lendingPool), totalAmountToPay);
 
-        /* Console log area - temporary */
-        console2.log(
-            "3.Balance of underlyingToken: ",
-            underlyingToken.balanceOf(address(this))
-        );
-        console2.log("3.Balance of wantToken: ", gainInWantToken);
-        console2.log(
-            "3.Balance of paymentToken: ",
-            paymentToken.balanceOf(address(this))
-        );
-        console2.log("3.Amount paid back: ", totalAmount);
-        emit OTokenCompounded(gainInWantToken, totalAmount);
-        return gainInWantToken;
+        emit OTokenCompounded(gainInWantToken, totalAmountToPay);
     }
 
     /***************************** Getters ***********************************/
-    /* Temporary for testing */
-    function getLastGain() external view returns (uint256) {
-        return gain;
-    }
-
     function ADDRESSES_PROVIDER()
         external
         view
@@ -362,21 +303,36 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     }
 
     /* Virtual functions */
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Want token of the strategy
+     */
     function wantToken() internal view virtual returns (address);
 
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Swapper contract used in the strategy
+     */
     function swapperSwaps() internal view virtual returns (address);
 
     /**
-     * @dev Returns an array of all the relevant roles arranged in descending order of privilege.
-     *      Subclasses should override this to specify their unique roles arranged in the correct
-     *      order, for example, [SUPER-ADMIN, ADMIN, GUARDIAN, STRATEGIST].
+     * @dev Subclasses should override this to specify their unique role-checking criteria.
+     * @return Returns bool value. {true} if {_account} has been granted {_role}.
      */
-    function _hasRoleForOptionsCompounder(
+    function hasRoleForOptionsCompounder(
         bytes32 _role,
         address _account
     ) internal view virtual returns (bool);
 
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Keeper role of the strategy
+     * */
     function getKeeperRole() internal pure virtual returns (bytes32);
 
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Admin roles of the strategy
+     * */
     function getAdminRoles() internal pure virtual returns (bytes32[] memory);
 }

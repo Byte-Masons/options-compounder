@@ -496,20 +496,28 @@ contract ReaperStrategyGranary is
     }
 
     /**
-     * @dev Returns {true} if {_account} has been granted {_role}. Subclasses should override
-     *      this to specify their unique role-checking criteria.
+     * @dev Subclasses should override this to specify their unique role-checking criteria.
+     * @return Returns bool value. {true} if {_account} has been granted {_role}.
      */
-    function _hasRoleForOptionsCompounder(
+    function hasRoleForOptionsCompounder(
         bytes32 _role,
         address _account
     ) internal view override returns (bool) {
         return hasRole(_role, _account);
     }
 
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Keeper role of the strategy
+     * */
     function getKeeperRole() internal pure override returns (bytes32) {
         return KEEPER;
     }
 
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Admin roles of the strategy
+     * */
     function getAdminRoles() internal pure override returns (bytes32[] memory) {
         bytes32[] memory admins = new bytes32[](2);
         admins[0] = ADMIN;

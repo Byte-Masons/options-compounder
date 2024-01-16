@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0
+// SPDX-License-Identifier: BUSL-1.1
+
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
@@ -12,6 +13,7 @@ import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperS
 
 contract OptionsTokenTest is Test {
     using FixedPointMathLib for uint256;
+
     /* Constants */
     uint256 constant AMOUNT = 2e18; // 2 ETH
     uint256 constant PERCENTAGE = 10_000;
@@ -19,7 +21,6 @@ contract OptionsTokenTest is Test {
     /* Variables */
     IERC20 paymentToken;
     IERC20 underlyingToken;
-
     address owner;
     address tokenAdmin;
     address[] treasuries;
@@ -31,15 +32,13 @@ contract OptionsTokenTest is Test {
     address management3;
     address keeper;
 
-    // /* Contract variables */
+    /* Contract variables */
     ERC1967Proxy tmpProxy;
     ReaperStrategySonne strategySonne;
     ReaperStrategySonne strategySonneProxy;
 
     function setUp() public {
-        /* Test vectors definition */
-
-        /* set up accounts */
+        /* Set up accounts */
         owner = makeAddr("owner");
         tokenAdmin = makeAddr("tokenAdmin");
         treasuries = new address[](2);
@@ -57,17 +56,6 @@ contract OptionsTokenTest is Test {
         vm.deal(owner, AMOUNT * 3);
     }
 
-    function fixture_convertion(
-        uint256 value,
-        uint256 divider,
-        uint256 multiplier
-    ) public pure returns (uint256) {
-        return
-            (value >= divider)
-                ? (value / divider) * multiplier
-                : (value * multiplier) / divider;
-    }
-
     function test_utFlashloanPositiveScenario(
         uint256 paymentAmountToMint,
         uint256 initialPaymentBalance,
@@ -76,15 +64,15 @@ contract OptionsTokenTest is Test {
         uint256 oTokensAmount,
         uint256 minWantAmount
     ) public {
-        /* Test vectors definition */
         /* Fixed */
         uint256 factor = 5000; // < PERCENTAGE
         uint256 premium = 100;
 
+        /*** Test vectors definitions ***/
+
         /* Payment token amount which is transfered at init and imitates initial 
         balance of the strategy before flashloan compound */
         initialPaymentBalance = bound(initialPaymentBalance, 0, 100 ether);
-        console2.log("Initial Payment amount: ", initialPaymentBalance);
 
         /* Payment token amount to mint at init - must be greater than all required 
         tokens (initial amount + amount transferred after swap) 
@@ -93,18 +81,12 @@ contract OptionsTokenTest is Test {
             paymentAmountToMint > (initialPaymentBalance + premium) &&
                 paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
         );
-        console2.log("Payment amount: ", paymentAmountToMint);
 
         /* Maximum amount of OTokens possible to simlate assuming minted and initial 
         amount of payment token */
         uint256 maxAmountOfOTokens = ((paymentAmountToMint -
             initialPaymentBalance) * PERCENTAGE) / factor;
-        console2.log(
-            "Maximum amount of OTokens possible: ",
-            maxAmountOfOTokens
-        );
         vm.assume(oTokensAmount <= maxAmountOfOTokens);
-        console2.log("OToken amount: ", oTokensAmount);
 
         /* Payment balance after swap shall be greater than borrowed asset + premium and 
         less than minted asset - initial balance */
@@ -114,12 +96,10 @@ contract OptionsTokenTest is Test {
                 paymentBalanceAfterSwap <
                 (paymentAmountToMint - initialPaymentBalance)
         );
-        console2.log("Borrowed Asset Amount: ", borrowedAssetBalance);
         vm.assume(
             paymentAmountToMint >
                 paymentBalanceAfterSwap + initialPaymentBalance
         );
-        console2.log("Adjusted payment amount: ", paymentAmountToMint);
 
         /* Want amount shall be grater than minWantAmount */
         minWantAmount = bound(minWantAmount, 1, 1e19);
@@ -215,14 +195,15 @@ contract OptionsTokenTest is Test {
         uint256 oTokensAmount,
         uint256 minWantAmount
     ) public {
-        /* Test vectors definition */
         /* Fixed */
         uint256 factor = 5000; // < PERCENTAGE
         uint256 premium = 100;
+
+        /*** Test vectors definitions ***/
+
         /* Payment token amount which is transfered at init and imitates initial 
         balance of the strategy before flashloan compound */
         initialPaymentBalance = bound(initialPaymentBalance, 0, 100 ether);
-        console2.log("Initial Payment amount: ", initialPaymentBalance);
 
         /* Payment token amount to mint at init - must be greater than all required 
         tokens (initial amount + amount transferred after swap) 
@@ -231,20 +212,15 @@ contract OptionsTokenTest is Test {
             paymentAmountToMint > (initialPaymentBalance + premium) &&
                 paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
         );
-        console2.log("Payment amount: ", paymentAmountToMint);
 
         /* Maximum amount of OTokens possible to simulate assuming minted and initial 
         amount of payment token */
         uint256 maxAmountOfOTokens = ((paymentAmountToMint -
             initialPaymentBalance -
             premium) * PERCENTAGE) / factor;
-        console2.log(
-            "Maximum amount of OTokens possible: ",
-            maxAmountOfOTokens
-        );
+
         /* Otoken amount must be some value between 0 and maximum amount calculated above */
         oTokensAmount = bound(oTokensAmount, 0, maxAmountOfOTokens);
-        console2.log("OToken amount: ", oTokensAmount);
 
         /* Payment balance after swap shall be less than borrowed asset + premium 
         so it make flashloan not profitable */
@@ -254,7 +230,6 @@ contract OptionsTokenTest is Test {
             0,
             (premium + borrowedAssetBalance)
         );
-        console2.log("Borrowed Asset Amount: ", borrowedAssetBalance);
 
         /* Want amount shall be grater than minWantAmount */
         minWantAmount = bound(minWantAmount, 1, 1e19);
@@ -337,16 +312,16 @@ contract OptionsTokenTest is Test {
         uint256 oTokensAmount,
         uint256 minWantAmount
     ) public {
-        /* Test vectors definition */
         /* Fixed */
         uint256 premium = 1000;
         /* Fuzzed factor less than 100% */
         uint256 factor = 5000;
 
+        /*** Test vectors definitions ***/
+
         /* Payment token amount which is transfered at init and imitates initial 
         balance of the strategy before flashloan compound */
         initialPaymentBalance = bound(initialPaymentBalance, 0, 100 ether);
-        console2.log("Initial Payment amount: ", initialPaymentBalance);
 
         /* Payment token amount to mint at init - must be greater than all required 
         tokens (initial amount + amount transferred after swap) 
@@ -355,22 +330,15 @@ contract OptionsTokenTest is Test {
             paymentAmountToMint > (initialPaymentBalance + premium) &&
                 paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
         );
-        console2.log("Payment amount: ", paymentAmountToMint);
 
         /* Maximum amount of OTokens possible to simlate assuming minted and initial 
         amount of payment token */
         uint256 maxAmountOfOTokens = ((paymentAmountToMint -
             initialPaymentBalance) * PERCENTAGE) / factor;
-        console2.log(
-            "Maximum amount of OTokens possible: ",
-            maxAmountOfOTokens
-        );
         vm.assume(oTokensAmount <= maxAmountOfOTokens);
-        console2.log("OToken amount: ", oTokensAmount);
 
         /* Borrowed token amount must reflect oTokenAmount value in payment token */
         uint256 borrowedAssetBalance = (oTokensAmount * factor) / PERCENTAGE;
-        console2.log("Borrowed Asset Amount: ", borrowedAssetBalance);
 
         /* Payment token amount increase after swap - to not revert 
         it must be greater than borrowed asset + premium and 
@@ -379,10 +347,6 @@ contract OptionsTokenTest is Test {
             paymentBalanceAfterSwap > (premium + borrowedAssetBalance) &&
                 paymentBalanceAfterSwap <
                 (paymentAmountToMint - initialPaymentBalance)
-        );
-        console2.log(
-            "Payment token amount after swap",
-            paymentBalanceAfterSwap
         );
 
         /* Want token shall be less than minWantAmount */
@@ -401,12 +365,10 @@ contract OptionsTokenTest is Test {
         keepers[0] = keeper;
 
         vm.startPrank(owner);
+
         /* Option compounder deployment */
-        console2.log("Deployment contract");
         strategySonne = new ReaperStrategySonne();
-        console2.log("Deployment strategy proxy");
         tmpProxy = new ERC1967Proxy(address(strategySonne), "");
-        console2.log("Initialization proxied sonne strategy");
         strategySonneProxy = ReaperStrategySonne(address(tmpProxy));
         UtMock utMock = new UtMock(
             paymentAmountToMint,

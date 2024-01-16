@@ -1,0 +1,6 @@
+# Network and account info
+RPC_URL_MAINNET=https://XXX
+
+PRIVATE_KEY=XXX
+
+ETHERSCAN_KEY=XXX

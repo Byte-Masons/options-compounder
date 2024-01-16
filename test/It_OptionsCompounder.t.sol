@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0
+// SPDX-License-Identifier: BUSL-1.1
+
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
@@ -31,30 +32,29 @@ contract OptionsTokenTest is Test {
     uint56 constant ORACLE_AGO = 2 minutes;
     uint128 constant ORACLE_MIN_PRICE = 1e10;
     uint56 constant ORACLE_LARGEST_SAFETY_WINDOW = 24 hours;
-    //uint256 constant ORACLE_INIT_TWAP_VALUE = 1e19;
     uint256 constant ORACLE_MIN_PRICE_DENOM = 10000;
     uint256 constant MAX_SUPPLY = 1e27; // the max supply of the options token & the underlying token
-    address constant POOL_ADDRESSES_PROVIDER =
+    address constant POOL_ADDRESSES_PROVIDER_V2 =
         0xdDE5dC81e40799750B92079723Da2acAF9e1C6D6; // Granary (aavev2)
     // AAVEv3 - 0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb;
     address constant WETH = 0x4200000000000000000000000000000000000006;
-    address constant OATH = 0x00e1724885473B63bCE08a9f0a52F35b0979e35A; // V1: 0x39FdE572a18448F8139b7788099F0a0740f51205;
+    address constant OATHV2 = 0x00e1724885473B63bCE08a9f0a52F35b0979e35A; // V1: 0x39FdE572a18448F8139b7788099F0a0740f51205;1
     address constant CUSDC = 0xEC8FEa79026FfEd168cCf5C627c7f486D77b765F;
     address constant GUSDC = 0x7A0FDDBA78FF45D353B1630B77f4D175A00df0c0;
     address constant DATA_PROVIDER = 0x9546F673eF71Ff666ae66d01Fd6E7C6Dae5a9995;
     bytes32 constant OATHV1_ETH_BPT =
-        0xd20f6f1d8a675cdca155cb07b5dc9042c467153f0002000000000000000000bc; /* OATHv1/ETH BPT */
+        0xd20f6f1d8a675cdca155cb07b5dc9042c467153f0002000000000000000000bc; // OATHv1/ETH BPT
     bytes32 constant OATHV2_ETH_BPT =
-        0xd13d81af624956327a24d0275cbe54b0ee0e9070000200000000000000000109; /* OATHv2/ETH BPT */
+        0xd13d81af624956327a24d0275cbe54b0ee0e9070000200000000000000000109; // OATHv2/ETH BPT
     bytes32 constant BTC_WETH_USDC_BPT =
         0x5028497af0c9a54ea8c6d42a054c0341b9fc6168000100000000000000000004;
     uint256 constant AMOUNT = 2e18; // 2 ETH
-
     address constant REWARDER = 0x6A0406B8103Ec68EE9A713A073C7bD587c5e04aD;
+    uint256 constant MIN_OATH_FOR_FUZZING = 1e19;
 
     /* Variables */
     ERC20 weth = ERC20(WETH);
-    IERC20 oath = IERC20(OATH);
+    IERC20 oath = IERC20(OATHV2);
     CErc20I cusdc = CErc20I(CUSDC);
     IERC20 paymentToken;
     IERC20 underlyingToken;
@@ -86,11 +86,12 @@ contract OptionsTokenTest is Test {
     Helper helper;
     uint256 initTwap = 0;
 
+    /* Functions */
     function fixture_prepareOptionToken(
         uint256 _amount,
         address _strategy
     ) public {
-        /* mint options tokens and transfer them to the strategy (rewards simulation) */
+        /* Mint options tokens and transfer them to the strategy (rewards simulation) */
         vm.startPrank(tokenAdmin);
         optionsTokenProxy.mint(tokenAdmin, _amount);
         optionsTokenProxy.transfer(_strategy, _amount);
@@ -98,10 +99,7 @@ contract OptionsTokenTest is Test {
     }
 
     function setUp() public {
-        /* Test vectors definition */
-        // initialAmount = bound(initialAmount, 1e17, 1e19);
-
-        /* set up accounts */
+        /* Setup accounts */
         owner = makeAddr("owner");
         tokenAdmin = makeAddr("tokenAdmin");
         treasuries = new address[](2);
@@ -118,13 +116,11 @@ contract OptionsTokenTest is Test {
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
-        /* setup network */
+        /* Setup network */
         uint256 optimismFork = vm.createFork(OPTIMISM_MAINNET_URL, FORK_BLOCK);
         vm.selectFork(optimismFork);
 
-        /* Variables */
-        paymentToken = IERC20(WETH);
-        underlyingToken = IERC20(OATH);
+        /* Setup roles */
         address[] memory strategists = new address[](1);
         address[] memory multisigRoles = new address[](3);
         address[] memory keepers = new address[](1);
@@ -134,7 +130,11 @@ contract OptionsTokenTest is Test {
         multisigRoles[2] = management3;
         keepers[0] = keeper;
 
+        /* Variables */
         uint256 targetLTV = 0.0001 ether;
+
+        paymentToken = IERC20(WETH);
+        underlyingToken = IERC20(OATHV2);
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -146,20 +146,21 @@ contract OptionsTokenTest is Test {
             address(this)
         );
 
+        /* Configure swapper */
         reaperSwapper.updateBalSwapPoolID(
-            address(weth),
-            address(oath),
+            WETH,
+            OATHV2,
             BEETX_VAULT_OP,
             OATHV2_ETH_BPT
         );
         reaperSwapper.updateBalSwapPoolID(
-            address(oath),
-            address(weth),
+            OATHV2,
+            WETH,
             BEETX_VAULT_OP,
             OATHV2_ETH_BPT
         );
         reaperSwapper.updateBalSwapPoolID(
-            address(weth),
+            WETH,
             cusdc.underlying(),
             BEETX_VAULT_OP,
             BTC_WETH_USDC_BPT
@@ -189,7 +190,7 @@ contract OptionsTokenTest is Test {
             "oTIT",
             tokenAdmin
         );
-
+        /* Exercise contract deployment */
         exerciser = new DiscountExercise(
             optionsTokenProxy,
             owner,
@@ -200,15 +201,12 @@ contract OptionsTokenTest is Test {
             treasuries,
             feeBPS
         );
-        // add exerciser to the list of options
+        /* Add exerciser to the list of options */
         optionsTokenProxy.setExerciseContract(address(exerciser), true);
 
         /* Sonne strategy deployment */
-        console2.log("Deployment contract");
         strategySonne = new ReaperStrategySonne();
-        console2.log("Deployment strategy proxy");
         tmpProxy = new ERC1967Proxy(address(strategySonne), "");
-        console2.log("Initialization proxied sonne strategy");
         strategySonneProxy = ReaperStrategySonne(address(tmpProxy));
         strategySonneProxy.initialize(
             vault,
@@ -218,16 +216,13 @@ contract OptionsTokenTest is Test {
             keepers,
             CUSDC,
             address(optionsTokenProxy),
-            POOL_ADDRESSES_PROVIDER,
+            POOL_ADDRESSES_PROVIDER_V2,
             targetLTV
         );
 
         /* Granary strategy deployment */
-        console2.log("Deployment contract");
         strategyGranary = new ReaperStrategyGranary();
-        console2.log("Deployment strategy proxy");
         tmpProxy = new ERC1967Proxy(address(strategyGranary), "");
-        console2.log("Initialization proxied sonne strategy");
         strategyGranaryProxy = ReaperStrategyGranary(address(tmpProxy));
         strategyGranaryProxy.initialize(
             vault,
@@ -238,7 +233,7 @@ contract OptionsTokenTest is Test {
             IAToken(GUSDC),
             targetLTV,
             2 * targetLTV,
-            POOL_ADDRESSES_PROVIDER,
+            POOL_ADDRESSES_PROVIDER_V2,
             DATA_PROVIDER,
             REWARDER,
             address(optionsTokenProxy)
@@ -246,7 +241,7 @@ contract OptionsTokenTest is Test {
         vm.stopPrank();
 
         /* Prepare EOA and contracts for tests */
-        helper.getWethFromEth{value: AMOUNT * 2}(WETH);
+        helper.wrapEth{value: AMOUNT * 2}(WETH);
 
         MinAmountOutData memory minAmountOutData = MinAmountOutData(
             MinAmountOutKind.Absolute,
@@ -261,20 +256,12 @@ contract OptionsTokenTest is Test {
             BEETX_VAULT_OP
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
-        initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Question: temporary inaccurate solution. How to get the newest price easily ?
-        console2.log(">>>> Init TWAP: ", initTwap);
+        initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
         oath.transfer(address(exerciser), underlyingBalance);
 
-        // set up contracts
+        /* Set up contracts */
         balancerTwapOracle.setTwapValue(initTwap);
         paymentToken.approve(address(exerciser), type(uint256).max);
-
-        // temp logs
-        console2.log("Sonne strategy: ", address(strategySonneProxy));
-        console2.log("Options Token: ", address(optionsTokenProxy));
-        console2.log("Address of this contract: ", address(this));
-        console2.log("Address of owner: ", owner);
-        console2.log("Address of token admin: ", tokenAdmin);
     }
 
     function test_accessControlFunctionsChecks(
@@ -283,7 +270,11 @@ contract OptionsTokenTest is Test {
         uint256 amount
     ) public {
         /* Test vectors definition */
-        amount = bound(amount, 100, oath.balanceOf(address(exerciser)));
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            oath.balanceOf(address(exerciser))
+        );
         vm.assume(
             hacker != tokenAdmin &&
                 hacker != keeper &&
@@ -319,9 +310,13 @@ contract OptionsTokenTest is Test {
 
     function test_flashloanPositiveScenarioSonne(uint256 amount) public {
         /* Test vectors definition */
-        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            oath.balanceOf(address(exerciser))
+        );
 
-        /* prepare option tokens - distribute them to the specified strategy 
+        /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
         fixture_prepareOptionToken(amount, address(strategySonneProxy));
 
@@ -331,15 +326,6 @@ contract OptionsTokenTest is Test {
         uint256 wantBalance = usdc.balanceOf(address(strategySonneProxy));
         uint256 optionsBalance = optionsTokenProxy.balanceOf(
             address(strategySonneProxy)
-        );
-        // temporary logs
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (weth): ",
-            wethBalance
-        );
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (want): ",
-            IERC20(cusdc.underlying()).balanceOf(address(strategySonneProxy))
         );
 
         vm.startPrank(keeper);
@@ -351,21 +337,9 @@ contract OptionsTokenTest is Test {
         );
         vm.stopPrank();
 
-        // temporary logs
-        console2.log(
-            "[Test] 2. Strategy after flashloan redemption (weth): ",
-            weth.balanceOf(address(strategySonneProxy))
-        );
-        console2.log(
-            "[Test] 2. Strategy after flashloan redemption (want): ",
-            IERC20(cusdc.underlying()).balanceOf(address(strategySonneProxy))
-        );
-        console2.log("[Test] 2. Gain: ", strategySonneProxy.getLastGain());
-
-        /* Check balances after compounding */
         /* Assertions */
         assertEq(
-            strategySonneProxy.getLastGain() > 0,
+            usdc.balanceOf(address(strategySonneProxy)) > wantBalance,
             true,
             "Gain not greater than 0"
         );
@@ -394,9 +368,13 @@ contract OptionsTokenTest is Test {
 
     function test_flashloanPositiveScenarioGranary(uint256 amount) public {
         /* Test vectors definition */
-        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            oath.balanceOf(address(exerciser))
+        );
 
-        /* prepare option tokens - distribute them to the specified strategy 
+        /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
         fixture_prepareOptionToken(amount, address(strategyGranaryProxy));
 
@@ -407,18 +385,10 @@ contract OptionsTokenTest is Test {
         uint256 optionsBalance = optionsTokenProxy.balanceOf(
             address(strategyGranaryProxy)
         );
-        // temporary logs
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (weth): ",
-            wethBalance
-        );
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (want): ",
-            IERC20(cusdc.underlying()).balanceOf(address(strategyGranaryProxy))
-        );
 
         vm.startPrank(keeper);
-        /* already approved in fixture_prepareOptionToken */
+
+        /* Already approved in fixture_prepareOptionToken */
         strategyGranaryProxy.harvestOTokens(
             amount,
             address(exerciser),
@@ -426,21 +396,9 @@ contract OptionsTokenTest is Test {
         );
         vm.stopPrank();
 
-        // temporary logs
-        console2.log(
-            "[Test] 2. Strategy after flashloan redemption (weth): ",
-            weth.balanceOf(address(strategyGranaryProxy))
-        );
-        console2.log(
-            "[Test] 2. Strategy after flashloan redemption (want): ",
-            IERC20(cusdc.underlying()).balanceOf(address(strategyGranaryProxy))
-        );
-        console2.log("[Test] 2. Gain: ", strategyGranaryProxy.getLastGain());
-
-        /* Check balances after compounding */
         /* Assertions */
         assertEq(
-            strategyGranaryProxy.getLastGain() > 0,
+            usdc.balanceOf(address(strategyGranaryProxy)) > wantBalance,
             true,
             "Gain not greater than 0"
         );
@@ -471,7 +429,11 @@ contract OptionsTokenTest is Test {
         uint256 amount
     ) public {
         /* Test vectors definition */
-        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            oath.balanceOf(address(exerciser))
+        );
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
@@ -485,26 +447,13 @@ contract OptionsTokenTest is Test {
         /* Increase TWAP price to make flashloan not profitable */
         balancerTwapOracle.setTwapValue(initTwap + ((initTwap * 10) / 100));
 
-        /* Check balances before compounding */
-        uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
-
-        // temporary logs
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (weth): ",
-            wethBalance
-        );
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (want): ",
-            IERC20(cusdc.underlying()).balanceOf(address(strategySonneProxy))
-        );
-
-        /* Already approved in fixture_prepareOptionToken */
         /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
         );
 
         vm.startPrank(keeper);
+        /* Already approved in fixture_prepareOptionToken */
         strategySonneProxy.harvestOTokens(
             amount,
             address(exerciser),
@@ -518,7 +467,11 @@ contract OptionsTokenTest is Test {
         uint256 minAmountOfWant
     ) public {
         /* Test vectors definition */
-        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            oath.balanceOf(address(exerciser))
+        );
         /* Too high expectation of profit - together with high exerciser multiplier makes flashloan not profitable */
         minAmountOfWant = bound(minAmountOfWant, 1e19, UINT256_MAX);
 
@@ -532,25 +485,11 @@ contract OptionsTokenTest is Test {
         exerciser.setMultiplier(9000);
         vm.stopPrank();
 
-        /* Check balances before compounding */
-        uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
-
-        // temporary logs
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (weth): ",
-            wethBalance
-        );
-        console2.log(
-            "[Test] 1. Strategy before flashloan redemption (want): ",
-            IERC20(cusdc.underlying()).balanceOf(address(strategySonneProxy))
-        );
-
-        /* Already approved in fixture_prepareOptionToken */
         /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
         );
-
+        /* Already approved in fixture_prepareOptionToken */
         vm.startPrank(keeper);
         strategySonneProxy.harvestOTokens(
             amount,
@@ -565,7 +504,11 @@ contract OptionsTokenTest is Test {
         address executor
     ) public {
         /* Test vectors definition */
-        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            oath.balanceOf(address(exerciser))
+        );
 
         /* Argument creation */
         address[] memory assets = new address[](1);
@@ -575,8 +518,8 @@ contract OptionsTokenTest is Test {
         uint256[] memory premiums = new uint256[](1);
         bytes memory params;
 
-        /* Assertion */
         vm.startPrank(executor);
+        /* Assertion */
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__FlashloanNotTriggered()"))
         );
@@ -595,7 +538,11 @@ contract OptionsTokenTest is Test {
         address fuzzedExerciser
     ) public {
         /* Test vectors definition */
-        amount = bound(amount, 1e19, oath.balanceOf(address(exerciser)));
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            oath.balanceOf(address(exerciser))
+        );
 
         vm.assume(fuzzedExerciser != address(exerciser));
 
@@ -604,6 +551,7 @@ contract OptionsTokenTest is Test {
         fixture_prepareOptionToken(amount, address(strategySonneProxy));
 
         vm.startPrank(keeper);
+        /* Assertion */
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__NotExerciseContract()"))
         );
