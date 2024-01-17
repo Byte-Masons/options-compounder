@@ -3,6 +3,8 @@
 pragma solidity ^0.8.0;
 
 /* Imports */
+import {console2} from "forge-std/Test.sol";
+
 import {IFlashLoanReceiver} from "aave-v2/flashloan//interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
@@ -11,11 +13,23 @@ import {IOptionsToken} from "optionsToken/src/interfaces/IOptionsToken.sol";
 import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
 import {Initializable} from "oz-upgradeable/proxy/utils/Initializable.sol";
 
 /* Externals */
 address constant BEETX_VAULT_OP = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
+
+enum ExchangeType {
+    UniV2,
+    Bal,
+    VeloSolid,
+    UniV3
+}
+
+struct SwapProps {
+    uint256 minAmountOut;
+    address exchangeAddress;
+    ExchangeType exchangeType;
+}
 
 /**
  * @title Consumes options tokens, exercise them with flashloaned asset and converts gain to strategy want token
@@ -32,6 +46,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     error OptionsCompounder__OnlyKeeperAllowed();
     error OptionsCompounder__OnlyAdminsAllowed();
     error OptionsCompounder__FlashloanNotTriggered();
+    error OptionsCompounder__InvalidExchangeType(uint256 exchangeType);
 
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
@@ -41,6 +56,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     ILendingPool private lendingPool;
     bool private flashloanFinished;
     IOptionsToken public optionToken;
+    SwapProps[] public swapProps;
 
     /* Events */
     event OTokenCompounded(
@@ -79,11 +95,13 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      * */
     function __OptionsCompounder_init(
         address _optionToken,
-        address _addressProvider
+        address _addressProvider,
+        SwapProps[] memory _swapProps
     ) internal onlyInitializing {
         optionToken = IOptionsToken(_optionToken);
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         lendingPool = ILendingPool(addressProvider.getLendingPool());
+        swapProps = _swapProps;
         flashloanFinished = true;
     }
 
@@ -95,6 +113,12 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      */
     function setOptionToken(address _optionToken) external onlyAdmins {
         optionToken = IOptionsToken(_optionToken);
+    }
+
+    function configSwapProps(
+        SwapProps[] memory _swapProps
+    ) external onlyAdmins {
+        swapProps = _swapProps;
     }
 
     /**
@@ -119,9 +143,6 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         }
         /* Locals */
         IERC20 paymentToken = DiscountExercise(exerciseContract).paymentToken();
-        address receiverAddress = address(this);
-        address onBehalfOf = address(this);
-        uint16 referralCode = 0;
         uint256 initialBalance = paymentToken.balanceOf(address(this));
 
         address[] memory assets = new address[](1);
@@ -146,13 +167,13 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         flashloanFinished = false;
 
         lendingPool.flashLoan(
-            receiverAddress,
+            address(this), // receiver
             assets,
             amounts,
             modes,
-            onBehalfOf,
+            address(this), // onBehalf
             params,
-            referralCode
+            0 // referal code
         );
     }
 
@@ -213,6 +234,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         MinAmountOutData memory minAmountOutData = MinAmountOutData(
             MinAmountOutKind.Absolute,
             0 // could use the oracle to set a min price from the options token
+            // oracle from oToken
         );
 
         /* Get underlying and payment tokens again to make sure there is no change between 
@@ -248,12 +270,13 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         underlyingToken.approve(swapperSwaps(), balanceOfUnderlyingToken);
 
         /* Swap underlying token to payment token (asset) */
-        ISwapperSwaps(swapperSwaps()).swapBal(
+        _generalSwap(
+            swapProps[0].exchangeType,
             address(underlyingToken),
             asset,
             balanceOfUnderlyingToken,
             minAmountOutData,
-            BEETX_VAULT_OP
+            swapProps[0].exchangeAddress
         );
 
         /* Calculate profit and revert if it is not profitable */
@@ -270,16 +293,18 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
         /* Get strategies want token */
         if (wantToken() != asset) {
-            ISwapperSwaps(swapperSwaps()).swapBal(
+            // checking against expected token
+            _generalSwap(
+                swapProps[0].exchangeType,
                 asset,
                 wantToken(),
                 gainInPaymentToken,
                 minAmountOutData,
-                BEETX_VAULT_OP
+                swapProps[0].exchangeAddress
             );
         }
 
-        gainInWantToken = IERC20(wantToken()).balanceOf(address(this));
+        gainInWantToken = IERC20(wantToken()).balanceOf(address(this)); // - inital balance from the begining
         if (gainInWantToken < minWantAmount) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
@@ -287,6 +312,52 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         IERC20(asset).approve(address(lendingPool), totalAmountToPay);
 
         emit OTokenCompounded(gainInWantToken, totalAmountToPay);
+    }
+
+    function _generalSwap(
+        ExchangeType exType,
+        address tokenIn,
+        address tokenOut,
+        uint256 amount,
+        MinAmountOutData memory minAmountOutData,
+        address exchangeAddress
+    ) private {
+        ISwapperSwaps swapper = ISwapperSwaps(swapperSwaps());
+        if (exType == ExchangeType.UniV2) {
+            swapper.swapUniV2(
+                tokenIn,
+                tokenOut,
+                amount,
+                minAmountOutData,
+                exchangeAddress
+            );
+        } else if (exType == ExchangeType.Bal) {
+            swapper.swapBal(
+                tokenIn,
+                tokenOut,
+                amount,
+                minAmountOutData,
+                exchangeAddress
+            );
+        } else if (exType == ExchangeType.VeloSolid) {
+            swapper.swapVelo(
+                tokenIn,
+                tokenOut,
+                amount,
+                minAmountOutData,
+                exchangeAddress
+            );
+        } else if (exType == ExchangeType.UniV3) {
+            swapper.swapUniV3(
+                tokenIn,
+                tokenOut,
+                amount,
+                minAmountOutData,
+                exchangeAddress
+            );
+        } else {
+            revert OptionsCompounder__InvalidExchangeType(uint256(exType));
+        }
     }
 
     /***************************** Getters ***********************************/

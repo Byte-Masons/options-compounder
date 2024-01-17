@@ -7,7 +7,7 @@ import "forge-std/Test.sol";
 import {ReaperStrategySonne} from "./strategies/ReaperStrategySonne.sol";
 import {ReaperStrategyGranary} from "./strategies/ReaperStrategyGranary.sol";
 import {BalancerOracle} from "optionsToken/src/oracles/BalancerOracle.sol";
-import {BEETX_VAULT_OP} from "../src/OptionsCompounder.sol";
+import {BEETX_VAULT_OP, SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
@@ -131,6 +131,9 @@ contract OptionsTokenTest is Test {
         keepers[0] = keeper;
 
         /* Variables */
+        SwapProps[] memory swapProps = new SwapProps[](1);
+        swapProps[0] = SwapProps(0, BEETX_VAULT_OP, ExchangeType.Bal);
+        // swapProps[1] = SwapProps(0, BEETX_VAULT_OP, ExchangeType.Bal);
         uint256 targetLTV = 0.0001 ether;
 
         paymentToken = IERC20(WETH);
@@ -217,7 +220,8 @@ contract OptionsTokenTest is Test {
             CUSDC,
             address(optionsTokenProxy),
             POOL_ADDRESSES_PROVIDER_V2,
-            targetLTV
+            targetLTV,
+            swapProps
         );
 
         /* Granary strategy deployment */
@@ -236,7 +240,8 @@ contract OptionsTokenTest is Test {
             POOL_ADDRESSES_PROVIDER_V2,
             DATA_PROVIDER,
             REWARDER,
-            address(optionsTokenProxy)
+            address(optionsTokenProxy),
+            swapProps
         );
         vm.stopPrank();
 
@@ -257,7 +262,7 @@ contract OptionsTokenTest is Test {
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
-        oath.transfer(address(exerciser), underlyingBalance);
+        underlyingToken.transfer(address(exerciser), underlyingBalance);
 
         /* Set up contracts */
         balancerTwapOracle.setTwapValue(initTwap);
@@ -324,9 +329,6 @@ contract OptionsTokenTest is Test {
         IERC20 usdc = IERC20(cusdc.underlying());
         uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
         uint256 wantBalance = usdc.balanceOf(address(strategySonneProxy));
-        uint256 optionsBalance = optionsTokenProxy.balanceOf(
-            address(strategySonneProxy)
-        );
 
         vm.startPrank(keeper);
         /* already approved in fixture_prepareOptionToken */
@@ -354,12 +356,6 @@ contract OptionsTokenTest is Test {
             "Lower want balance than before"
         );
         assertEq(
-            optionsBalance >
-                optionsTokenProxy.balanceOf(address(strategySonneProxy)),
-            true,
-            "Lower balance than before"
-        );
-        assertEq(
             0 == optionsTokenProxy.balanceOf(address(strategySonneProxy)),
             true,
             "Options token balance is not 0"
@@ -382,9 +378,6 @@ contract OptionsTokenTest is Test {
         IERC20 usdc = IERC20(cusdc.underlying());
         uint256 wethBalance = weth.balanceOf(address(strategyGranaryProxy));
         uint256 wantBalance = usdc.balanceOf(address(strategyGranaryProxy));
-        uint256 optionsBalance = optionsTokenProxy.balanceOf(
-            address(strategyGranaryProxy)
-        );
 
         vm.startPrank(keeper);
 
@@ -411,12 +404,6 @@ contract OptionsTokenTest is Test {
             wantBalance <= usdc.balanceOf(address(strategyGranaryProxy)),
             true,
             "Lower want balance than before"
-        );
-        assertEq(
-            optionsBalance >
-                optionsTokenProxy.balanceOf(address(strategyGranaryProxy)),
-            true,
-            "Lower balance than before"
         );
         assertEq(
             0 == optionsTokenProxy.balanceOf(address(strategyGranaryProxy)),

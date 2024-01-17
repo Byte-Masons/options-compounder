@@ -12,7 +12,7 @@ import {SafeERC20Upgradeable} from "oz-upgradeable/token/ERC20/utils/SafeERC20Up
 import {IERC20Upgradeable} from "oz-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import {MathUpgradeable} from "oz-upgradeable/utils/math/MathUpgradeable.sol";
 import {ReaperMathUtils} from "vault-v2/libraries/ReaperMathUtils.sol";
-import {OptionsCompounder} from "../../src/OptionsCompounder.sol";
+import {SwapProps, OptionsCompounder} from "../../src/OptionsCompounder.sol";
 
 /**
  * @dev This strategy will deposit a token on Sonne to maximize yield
@@ -69,7 +69,8 @@ contract ReaperStrategySonne is
         address _cWant,
         address _optionsToken,
         address _addressProvider,
-        uint256 _targetLTV
+        uint256 _targetLTV,
+        SwapProps[] memory _swapProps
     ) public initializer {
         cWant = CErc20I(_cWant);
         __ReaperBaseStrategy_init(
@@ -80,7 +81,7 @@ contract ReaperStrategySonne is
             _multisigRoles,
             _keepers
         );
-        __OptionsCompounder_init(_optionsToken, _addressProvider);
+        __OptionsCompounder_init(_optionsToken, _addressProvider, _swapProps);
         markets = [_cWant];
         comptroller = IComptroller(cWant.comptroller());
 
