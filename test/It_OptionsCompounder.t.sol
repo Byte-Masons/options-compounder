@@ -11,6 +11,7 @@ import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
+// import {IBalancerTwapOracle} from "optionsToken/src/interfaces/IBalancerTwapOracle.sol";
 import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
@@ -38,13 +39,6 @@ contract OptionsTokenTest is Common {
     string MAINNET_URL = vm.envString("OP_RPC_URL_MAINNET");
     CErc20I cusdc = CErc20I(OP_CUSDC);
 
-    IERC20 nativeToken = IERC20(BSC_WBNB);
-    IERC20 paymentToken = nativeToken;
-    IERC20 underlyingToken = IERC20(OP_OATHV1);
-    IERC20 wantToken;
-    bytes32 paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
-    bytes32 paymentWantBpt = OP_BTC_WETH_USDC_BPT;
-    address balancerVault = OP_BEETX_VAULT;
     ExchangeType exchangeType = ExchangeType.Bal;
 
     address owner;
@@ -64,18 +58,21 @@ contract OptionsTokenTest is Common {
     OptionsToken optionsTokenProxy;
     DiscountExercise exerciser;
     BalancerOracle oracle;
-    MockBalancerTwapOracle balancerTwapOracle;
+    MockBalancerTwapOracle underlyingPaymentOracle;
+    MockBalancerTwapOracle paymentWantOracle;
     ReaperStrategySonne strategySonne;
     ReaperStrategySonne strategySonneProxy;
     ReaperStrategyGranary strategyGranary;
     ReaperStrategyGranary strategyGranaryProxy;
-    ReaperSwapper reaperSwapper;
     Helper helper;
     uint256 initTwap = 0;
 
     /* Functions */
     function setUp() public {
-        wantToken = IERC20(cusdc.underlying());
+        nativeToken = IERC20(OP_WETH);
+        paymentToken = nativeToken;
+        underlyingToken = IERC20(OP_OATHV1);
+        wantToken = IERC20(0x7F5c764cBc14f9669B88837ca1490cCa17c31607); //IERC20(cusdc.underlying());
         /* Setup accounts */
         owner = makeAddr("owner");
         tokenAdmin = makeAddr("tokenAdmin");
@@ -131,15 +128,35 @@ contract OptionsTokenTest is Common {
         address[] memory tokens = new address[](2);
         tokens[0] = address(underlyingToken);
         tokens[1] = address(paymentToken);
-        balancerTwapOracle = new MockBalancerTwapOracle(tokens);
+        underlyingPaymentOracle = new MockBalancerTwapOracle(tokens);
         oracle = new BalancerOracle(
-            balancerTwapOracle,
+            underlyingPaymentOracle,
             address(underlyingToken),
             owner,
             ORACLE_SECS,
             ORACLE_AGO,
             ORACLE_MIN_PRICE
         );
+
+        tokens[0] = address(paymentToken);
+        tokens[1] = address(wantToken);
+        paymentWantOracle = new MockBalancerTwapOracle(tokens);
+        oracle = new BalancerOracle(
+            paymentWantOracle,
+            address(paymentToken),
+            owner,
+            ORACLE_SECS,
+            ORACLE_AGO,
+            ORACLE_MIN_PRICE
+        );
+
+        IOracle[] memory oracles = new IOracle[](2);
+        oracles[0] = IOracle(address(underlyingPaymentOracle));
+        oracles[1] = IOracle(address(paymentWantOracle));
+
+        /* Set up contracts */
+        underlyingPaymentOracle.setTwapValue(initTwap);
+        paymentWantOracle.setTwapValue(25e20); // 2500
 
         /* Option token deployment */
         vm.startPrank(owner);
@@ -217,13 +234,12 @@ contract OptionsTokenTest is Common {
             "Balance of underlying: ",
             underlyingToken.balanceOf(address(this))
         );
-        reaperSwapper.swapVelo(
+        reaperSwapper.swapBal(
             address(paymentToken),
             address(underlyingToken),
             AMOUNT,
             minAmountOutData,
-            veloRouter,
-            type(uint256).max
+            OP_BEETX_VAULT
         );
         console2.log(
             "Balance of underlying: ",
@@ -233,8 +249,6 @@ contract OptionsTokenTest is Common {
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
         underlyingToken.transfer(address(exerciser), underlyingBalance);
 
-        /* Set up contracts */
-        balancerTwapOracle.setTwapValue(initTwap);
         paymentToken.approve(address(exerciser), type(uint256).max);
     }
 
@@ -292,7 +306,12 @@ contract OptionsTokenTest is Common {
 
         /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
-        fixture_prepareOptionToken(amount, address(strategySonneProxy));
+        fixture_prepareOptionToken(
+            amount,
+            address(strategySonneProxy),
+            optionsTokenProxy,
+            tokenAdmin
+        );
 
         /* Check balances before compounding */
         uint256 paymentTokenBalance = paymentToken.balanceOf(
@@ -343,7 +362,12 @@ contract OptionsTokenTest is Common {
 
         /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
-        fixture_prepareOptionToken(amount, address(strategyGranaryProxy));
+        fixture_prepareOptionToken(
+            amount,
+            address(strategyGranaryProxy),
+            optionsTokenProxy,
+            tokenAdmin
+        );
 
         /* Check balances before compounding */
         uint256 paymentTokenBalance = paymentToken.balanceOf(
@@ -399,7 +423,12 @@ contract OptionsTokenTest is Common {
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
-        fixture_prepareOptionToken(amount, address(strategySonneProxy));
+        fixture_prepareOptionToken(
+            amount,
+            address(strategySonneProxy),
+            optionsTokenProxy,
+            tokenAdmin
+        );
 
         /* Decrease option discount in order to make redemption not profitable */
         /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
@@ -407,7 +436,9 @@ contract OptionsTokenTest is Common {
         exerciser.setMultiplier(9999);
         vm.stopPrank();
         /* Increase TWAP price to make flashloan not profitable */
-        balancerTwapOracle.setTwapValue(initTwap + ((initTwap * 10) / 100));
+        underlyingPaymentOracle.setTwapValue(
+            initTwap + ((initTwap * 10) / 100)
+        );
 
         /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
         vm.expectRevert(
@@ -439,7 +470,12 @@ contract OptionsTokenTest is Common {
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
-        fixture_prepareOptionToken(amount, address(strategySonneProxy));
+        fixture_prepareOptionToken(
+            amount,
+            address(strategySonneProxy),
+            optionsTokenProxy,
+            tokenAdmin
+        );
 
         /* Decrease option discount in order to make redemption not profitable */
         /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
@@ -510,7 +546,12 @@ contract OptionsTokenTest is Common {
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
-        fixture_prepareOptionToken(amount, address(strategySonneProxy));
+        fixture_prepareOptionToken(
+            amount,
+            address(strategySonneProxy),
+            optionsTokenProxy,
+            tokenAdmin
+        );
 
         vm.startPrank(keeper);
         /* Assertion */
