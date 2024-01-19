@@ -15,6 +15,7 @@ import {IERC20Upgradeable} from "oz-upgradeable/token/ERC20/IERC20Upgradeable.so
 import {MathUpgradeable} from "oz-upgradeable/utils/math/MathUpgradeable.sol";
 import {ReaperMathUtils} from "vault-v2/libraries/ReaperMathUtils.sol";
 import {SwapProps, OptionsCompounder} from "../../src/OptionsCompounder.sol";
+import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 
 /**
  * @dev This strategy will deposit and leverage a token on Granary to maximize yield
@@ -72,7 +73,8 @@ contract ReaperStrategyGranary is
         address _dataProvider,
         address _rewarder,
         address _optionsToken,
-        SwapProps[] memory _swapProps
+        SwapProps memory _swapProps,
+        IOracle[] memory _oracles
     ) public initializer {
         gWant = _gWant;
         want = _gWant.UNDERLYING_ASSET_ADDRESS();
@@ -84,7 +86,12 @@ contract ReaperStrategyGranary is
             _multisigRoles,
             _keepers
         );
-        __OptionsCompounder_init(_optionsToken, _addressProvider, _swapProps);
+        __OptionsCompounder_init(
+            _optionsToken,
+            _addressProvider,
+            _swapProps,
+            _oracles
+        );
         maxDeleverageLoopIterations = 10;
         minLeverageAmount = 1000;
 

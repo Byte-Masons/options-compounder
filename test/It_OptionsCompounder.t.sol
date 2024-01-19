@@ -2,12 +2,12 @@
 
 pragma solidity ^0.8.13;
 
-import "forge-std/Test.sol";
+import "./Common.sol";
 
 import {ReaperStrategySonne} from "./strategies/ReaperStrategySonne.sol";
 import {ReaperStrategyGranary} from "./strategies/ReaperStrategyGranary.sol";
 import {BalancerOracle} from "optionsToken/src/oracles/BalancerOracle.sol";
-import {BEETX_VAULT_OP, SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
+import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
@@ -18,47 +18,34 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {IAToken} from "./strategies/interfaces/IAToken.sol";
+import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 
 // import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperSwapper.sol";
+import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter, RouterV2} from "./mocks/ReaperSwapper.sol";
 
-contract OptionsTokenTest is Test {
+contract OptionsTokenTest is Common {
+    enum TestChain {
+        OPTIMISM,
+        BSC
+    }
+
+    TestChain testChain = TestChain.BSC;
+
     using FixedPointMathLib for uint256;
     /* Constants */
-    uint256 constant FORK_BLOCK = 114768697;
-    uint256 constant NON_ZERO_PROFIT = 1;
-    uint16 constant PRICE_MULTIPLIER = 5000; // 0.5
-    uint56 constant ORACLE_SECS = 30 minutes;
-    uint56 constant ORACLE_AGO = 2 minutes;
-    uint128 constant ORACLE_MIN_PRICE = 1e10;
-    uint56 constant ORACLE_LARGEST_SAFETY_WINDOW = 24 hours;
-    uint256 constant ORACLE_MIN_PRICE_DENOM = 10000;
-    uint256 constant MAX_SUPPLY = 1e27; // the max supply of the options token & the underlying token
-    address constant POOL_ADDRESSES_PROVIDER_V2 =
-        0xdDE5dC81e40799750B92079723Da2acAF9e1C6D6; // Granary (aavev2)
-    // AAVEv3 - 0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb;
-    address constant WETH = 0x4200000000000000000000000000000000000006;
-    address constant OATHV2 = 0x00e1724885473B63bCE08a9f0a52F35b0979e35A; // V1: 0x39FdE572a18448F8139b7788099F0a0740f51205;1
-    address constant CUSDC = 0xEC8FEa79026FfEd168cCf5C627c7f486D77b765F;
-    address constant GUSDC = 0x7A0FDDBA78FF45D353B1630B77f4D175A00df0c0;
-    address constant DATA_PROVIDER = 0x9546F673eF71Ff666ae66d01Fd6E7C6Dae5a9995;
-    bytes32 constant OATHV1_ETH_BPT =
-        0xd20f6f1d8a675cdca155cb07b5dc9042c467153f0002000000000000000000bc; // OATHv1/ETH BPT
-    bytes32 constant OATHV2_ETH_BPT =
-        0xd13d81af624956327a24d0275cbe54b0ee0e9070000200000000000000000109; // OATHv2/ETH BPT
-    bytes32 constant BTC_WETH_USDC_BPT =
-        0x5028497af0c9a54ea8c6d42a054c0341b9fc6168000100000000000000000004;
-    uint256 constant AMOUNT = 2e18; // 2 ETH
-    address constant REWARDER = 0x6A0406B8103Ec68EE9A713A073C7bD587c5e04aD;
-    uint256 constant MIN_OATH_FOR_FUZZING = 1e19;
 
-    /* Variables */
-    ERC20 weth = ERC20(WETH);
-    IERC20 oath = IERC20(OATHV2);
-    CErc20I cusdc = CErc20I(CUSDC);
-    IERC20 paymentToken;
-    IERC20 underlyingToken;
-    string OPTIMISM_MAINNET_URL = vm.envString("RPC_URL_MAINNET");
+    /* Variable assignment (depends on chain) */
+    string MAINNET_URL = vm.envString("OP_RPC_URL_MAINNET");
+    CErc20I cusdc = CErc20I(OP_CUSDC);
+
+    IERC20 nativeToken = IERC20(BSC_WBNB);
+    IERC20 paymentToken = nativeToken;
+    IERC20 underlyingToken = IERC20(OP_OATHV1);
+    IERC20 wantToken;
+    bytes32 paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
+    bytes32 paymentWantBpt = OP_BTC_WETH_USDC_BPT;
+    address balancerVault = OP_BEETX_VAULT;
+    ExchangeType exchangeType = ExchangeType.Bal;
 
     address owner;
     address tokenAdmin;
@@ -87,18 +74,8 @@ contract OptionsTokenTest is Test {
     uint256 initTwap = 0;
 
     /* Functions */
-    function fixture_prepareOptionToken(
-        uint256 _amount,
-        address _strategy
-    ) public {
-        /* Mint options tokens and transfer them to the strategy (rewards simulation) */
-        vm.startPrank(tokenAdmin);
-        optionsTokenProxy.mint(tokenAdmin, _amount);
-        optionsTokenProxy.transfer(_strategy, _amount);
-        vm.stopPrank();
-    }
-
     function setUp() public {
+        wantToken = IERC20(cusdc.underlying());
         /* Setup accounts */
         owner = makeAddr("owner");
         tokenAdmin = makeAddr("tokenAdmin");
@@ -117,7 +94,7 @@ contract OptionsTokenTest is Test {
         vm.deal(owner, AMOUNT * 3);
 
         /* Setup network */
-        uint256 optimismFork = vm.createFork(OPTIMISM_MAINNET_URL, FORK_BLOCK);
+        uint256 optimismFork = vm.createFork(MAINNET_URL); //, FORK_BLOCK);
         vm.selectFork(optimismFork);
 
         /* Setup roles */
@@ -131,13 +108,11 @@ contract OptionsTokenTest is Test {
         keepers[0] = keeper;
 
         /* Variables */
-        SwapProps[] memory swapProps = new SwapProps[](1);
-        swapProps[0] = SwapProps(0, BEETX_VAULT_OP, ExchangeType.Bal);
-        // swapProps[1] = SwapProps(0, BEETX_VAULT_OP, ExchangeType.Bal);
+        SwapProps memory swapProps = SwapProps(
+            OP_BEETX_VAULT,
+            ExchangeType.Bal
+        );
         uint256 targetLTV = 0.0001 ether;
-
-        paymentToken = IERC20(WETH);
-        underlyingToken = IERC20(OATHV2);
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -150,24 +125,7 @@ contract OptionsTokenTest is Test {
         );
 
         /* Configure swapper */
-        reaperSwapper.updateBalSwapPoolID(
-            WETH,
-            OATHV2,
-            BEETX_VAULT_OP,
-            OATHV2_ETH_BPT
-        );
-        reaperSwapper.updateBalSwapPoolID(
-            OATHV2,
-            WETH,
-            BEETX_VAULT_OP,
-            OATHV2_ETH_BPT
-        );
-        reaperSwapper.updateBalSwapPoolID(
-            WETH,
-            cusdc.underlying(),
-            BEETX_VAULT_OP,
-            BTC_WETH_USDC_BPT
-        );
+        fixture_configureSwapper(exchangeType);
 
         /* Oracle mocks deployment */
         address[] memory tokens = new address[](2);
@@ -217,11 +175,12 @@ contract OptionsTokenTest is Test {
             strategists,
             multisigRoles,
             keepers,
-            CUSDC,
+            address(cusdc),
             address(optionsTokenProxy),
-            POOL_ADDRESSES_PROVIDER_V2,
+            OP_POOL_ADDRESSES_PROVIDER_V2,
             targetLTV,
-            swapProps
+            swapProps,
+            oracles
         );
 
         /* Granary strategy deployment */
@@ -234,31 +193,41 @@ contract OptionsTokenTest is Test {
             strategists,
             multisigRoles,
             keepers,
-            IAToken(GUSDC),
+            IAToken(OP_GUSDC),
             targetLTV,
             2 * targetLTV,
-            POOL_ADDRESSES_PROVIDER_V2,
-            DATA_PROVIDER,
+            OP_POOL_ADDRESSES_PROVIDER_V2,
+            OP_DATA_PROVIDER,
             REWARDER,
             address(optionsTokenProxy),
-            swapProps
+            swapProps,
+            oracles
         );
         vm.stopPrank();
 
         /* Prepare EOA and contracts for tests */
-        helper.wrapEth{value: AMOUNT * 2}(WETH);
+        helper.wrapEth{value: AMOUNT * 2}(address(nativeToken));
 
         MinAmountOutData memory minAmountOutData = MinAmountOutData(
             MinAmountOutKind.Absolute,
             0
         );
-        weth.approve(address(reaperSwapper), AMOUNT);
-        reaperSwapper.swapBal(
-            address(weth),
+        paymentToken.approve(address(reaperSwapper), AMOUNT);
+        console2.log(
+            "Balance of underlying: ",
+            underlyingToken.balanceOf(address(this))
+        );
+        reaperSwapper.swapVelo(
+            address(paymentToken),
             address(underlyingToken),
             AMOUNT,
             minAmountOutData,
-            BEETX_VAULT_OP
+            veloRouter,
+            type(uint256).max
+        );
+        console2.log(
+            "Balance of underlying: ",
+            underlyingToken.balanceOf(address(this))
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
@@ -278,7 +247,7 @@ contract OptionsTokenTest is Test {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            oath.balanceOf(address(exerciser))
+            underlyingToken.balanceOf(address(exerciser))
         );
         vm.assume(
             hacker != tokenAdmin &&
@@ -318,7 +287,7 @@ contract OptionsTokenTest is Test {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            oath.balanceOf(address(exerciser))
+            underlyingToken.balanceOf(address(exerciser))
         );
 
         /* Prepare option tokens - distribute them to the specified strategy 
@@ -326,9 +295,10 @@ contract OptionsTokenTest is Test {
         fixture_prepareOptionToken(amount, address(strategySonneProxy));
 
         /* Check balances before compounding */
-        IERC20 usdc = IERC20(cusdc.underlying());
-        uint256 wethBalance = weth.balanceOf(address(strategySonneProxy));
-        uint256 wantBalance = usdc.balanceOf(address(strategySonneProxy));
+        uint256 paymentTokenBalance = paymentToken.balanceOf(
+            address(strategySonneProxy)
+        );
+        uint256 wantBalance = wantToken.balanceOf(address(strategySonneProxy));
 
         vm.startPrank(keeper);
         /* already approved in fixture_prepareOptionToken */
@@ -341,17 +311,18 @@ contract OptionsTokenTest is Test {
 
         /* Assertions */
         assertEq(
-            usdc.balanceOf(address(strategySonneProxy)) > wantBalance,
+            wantToken.balanceOf(address(strategySonneProxy)) > wantBalance,
             true,
             "Gain not greater than 0"
         );
         assertEq(
-            wethBalance <= weth.balanceOf(address(strategySonneProxy)),
+            paymentTokenBalance <=
+                paymentToken.balanceOf(address(strategySonneProxy)),
             true,
-            "Lower weth balance than before"
+            "Lower paymentToken balance than before"
         );
         assertEq(
-            wantBalance <= usdc.balanceOf(address(strategySonneProxy)),
+            wantBalance <= wantToken.balanceOf(address(strategySonneProxy)),
             true,
             "Lower want balance than before"
         );
@@ -367,7 +338,7 @@ contract OptionsTokenTest is Test {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            oath.balanceOf(address(exerciser))
+            underlyingToken.balanceOf(address(exerciser))
         );
 
         /* Prepare option tokens - distribute them to the specified strategy 
@@ -375,9 +346,12 @@ contract OptionsTokenTest is Test {
         fixture_prepareOptionToken(amount, address(strategyGranaryProxy));
 
         /* Check balances before compounding */
-        IERC20 usdc = IERC20(cusdc.underlying());
-        uint256 wethBalance = weth.balanceOf(address(strategyGranaryProxy));
-        uint256 wantBalance = usdc.balanceOf(address(strategyGranaryProxy));
+        uint256 paymentTokenBalance = paymentToken.balanceOf(
+            address(strategyGranaryProxy)
+        );
+        uint256 wantBalance = wantToken.balanceOf(
+            address(strategyGranaryProxy)
+        );
 
         vm.startPrank(keeper);
 
@@ -391,17 +365,18 @@ contract OptionsTokenTest is Test {
 
         /* Assertions */
         assertEq(
-            usdc.balanceOf(address(strategyGranaryProxy)) > wantBalance,
+            wantToken.balanceOf(address(strategyGranaryProxy)) > wantBalance,
             true,
             "Gain not greater than 0"
         );
         assertEq(
-            wethBalance <= weth.balanceOf(address(strategyGranaryProxy)),
+            paymentTokenBalance <=
+                paymentToken.balanceOf(address(strategyGranaryProxy)),
             true,
-            "Lower weth balance than before"
+            "Lower paymentToken balance than before"
         );
         assertEq(
-            wantBalance <= usdc.balanceOf(address(strategyGranaryProxy)),
+            wantBalance <= wantToken.balanceOf(address(strategyGranaryProxy)),
             true,
             "Lower want balance than before"
         );
@@ -419,7 +394,7 @@ contract OptionsTokenTest is Test {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            oath.balanceOf(address(exerciser))
+            underlyingToken.balanceOf(address(exerciser))
         );
 
         /* Prepare option tokens - distribute them to the specified strategy
@@ -457,7 +432,7 @@ contract OptionsTokenTest is Test {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            oath.balanceOf(address(exerciser))
+            underlyingToken.balanceOf(address(exerciser))
         );
         /* Too high expectation of profit - together with high exerciser multiplier makes flashloan not profitable */
         minAmountOfWant = bound(minAmountOfWant, 1e19, UINT256_MAX);
@@ -494,7 +469,7 @@ contract OptionsTokenTest is Test {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            oath.balanceOf(address(exerciser))
+            underlyingToken.balanceOf(address(exerciser))
         );
 
         /* Argument creation */
@@ -528,7 +503,7 @@ contract OptionsTokenTest is Test {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            oath.balanceOf(address(exerciser))
+            underlyingToken.balanceOf(address(exerciser))
         );
 
         vm.assume(fuzzedExerciser != address(exerciser));
