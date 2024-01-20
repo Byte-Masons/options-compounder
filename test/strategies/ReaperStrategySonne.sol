@@ -71,7 +71,8 @@ contract ReaperStrategySonne is
         address _optionsToken,
         address _addressProvider,
         uint256 _targetLTV,
-        SwapProps memory _swapProps,
+        uint256 _maxSwapSlippage,
+        SwapProps[] memory _swapProps,
         IOracle[] memory _oracles
     ) public initializer {
         cWant = CErc20I(_cWant);
@@ -86,6 +87,7 @@ contract ReaperStrategySonne is
         __OptionsCompounder_init(
             _optionsToken,
             _addressProvider,
+            _maxSwapSlippage,
             _swapProps,
             _oracles
         );

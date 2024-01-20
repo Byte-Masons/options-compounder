@@ -11,7 +11,6 @@ import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
-// import {IBalancerTwapOracle} from "optionsToken/src/interfaces/IBalancerTwapOracle.sol";
 import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
@@ -25,73 +24,45 @@ import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter, RouterV2} from "./mocks/ReaperSwapper.sol";
 
 contract OptionsTokenTest is Common {
-    enum TestChain {
-        OPTIMISM,
-        BSC
-    }
-
-    TestChain testChain = TestChain.BSC;
-
     using FixedPointMathLib for uint256;
-    /* Constants */
 
     /* Variable assignment (depends on chain) */
+    uint256 FORK_BLOCK = 115072010;
     string MAINNET_URL = vm.envString("OP_RPC_URL_MAINNET");
-    CErc20I cusdc = CErc20I(OP_CUSDC);
-
-    ExchangeType exchangeType = ExchangeType.Bal;
-
-    address owner;
-    address tokenAdmin;
-    address[] treasuries;
-    uint256[] feeBPS;
-    address strategist = address(4);
-    address vault;
-    address management1;
-    address management2;
-    address management3;
-    address keeper;
 
     /* Contract variables */
+    CErc20I cusdc;
     OptionsToken optionsToken;
     ERC1967Proxy tmpProxy;
     OptionsToken optionsTokenProxy;
     DiscountExercise exerciser;
-    BalancerOracle oracle;
-    MockBalancerTwapOracle underlyingPaymentOracle;
-    MockBalancerTwapOracle paymentWantOracle;
+    MockBalancerTwapOracle underlyingPaymentMock;
+    BalancerOracle underlyingPaymentOracle;
+    BalancerOracle paymentWantOracle;
     ReaperStrategySonne strategySonne;
     ReaperStrategySonne strategySonneProxy;
     ReaperStrategyGranary strategyGranary;
     ReaperStrategyGranary strategyGranaryProxy;
     Helper helper;
-    uint256 initTwap = 0;
+    uint256 initTwap;
 
     /* Functions */
     function setUp() public {
+        /* Common assignments */
+        ExchangeType exchangeType = ExchangeType.Bal;
+        cusdc = CErc20I(OP_CUSDC);
         nativeToken = IERC20(OP_WETH);
         paymentToken = nativeToken;
         underlyingToken = IERC20(OP_OATHV1);
-        wantToken = IERC20(0x7F5c764cBc14f9669B88837ca1490cCa17c31607); //IERC20(cusdc.underlying());
+        wantToken = IERC20(OP_USDC);
+
         /* Setup accounts */
-        owner = makeAddr("owner");
-        tokenAdmin = makeAddr("tokenAdmin");
-        treasuries = new address[](2);
-        treasuries[0] = makeAddr("treasury1");
-        treasuries[1] = makeAddr("treasury2");
-        vault = makeAddr("vault");
-        management1 = makeAddr("management1");
-        management2 = makeAddr("management2");
-        management3 = makeAddr("management3");
-        keeper = makeAddr("keeper");
-        feeBPS = new uint256[](2);
-        feeBPS[0] = 10;
-        feeBPS[1] = 2000;
+        fixture_setupAccountsAndFees(1500, 200);
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
         /* Setup network */
-        uint256 optimismFork = vm.createFork(MAINNET_URL); //, FORK_BLOCK);
+        uint256 optimismFork = vm.createFork(MAINNET_URL, FORK_BLOCK);
         vm.selectFork(optimismFork);
 
         /* Setup roles */
@@ -105,10 +76,9 @@ contract OptionsTokenTest is Common {
         keepers[0] = keeper;
 
         /* Variables */
-        SwapProps memory swapProps = SwapProps(
-            OP_BEETX_VAULT,
-            ExchangeType.Bal
-        );
+        SwapProps[] memory swapProps = new SwapProps[](2);
+        swapProps[0] = SwapProps(OP_BEETX_VAULT, ExchangeType.Bal);
+        swapProps[1] = SwapProps(OP_BEETX_VAULT, ExchangeType.Bal);
         uint256 targetLTV = 0.0001 ether;
 
         /**** Contract deployments and configurations ****/
@@ -128,9 +98,9 @@ contract OptionsTokenTest is Common {
         address[] memory tokens = new address[](2);
         tokens[0] = address(underlyingToken);
         tokens[1] = address(paymentToken);
-        underlyingPaymentOracle = new MockBalancerTwapOracle(tokens);
-        oracle = new BalancerOracle(
-            underlyingPaymentOracle,
+        underlyingPaymentMock = new MockBalancerTwapOracle(tokens);
+        underlyingPaymentOracle = new BalancerOracle(
+            underlyingPaymentMock,
             address(underlyingToken),
             owner,
             ORACLE_SECS,
@@ -140,9 +110,11 @@ contract OptionsTokenTest is Common {
 
         tokens[0] = address(paymentToken);
         tokens[1] = address(wantToken);
-        paymentWantOracle = new MockBalancerTwapOracle(tokens);
-        oracle = new BalancerOracle(
-            paymentWantOracle,
+        MockBalancerTwapOracle paymentWantMock = new MockBalancerTwapOracle(
+            tokens
+        );
+        paymentWantOracle = new BalancerOracle(
+            paymentWantMock,
             address(paymentToken),
             owner,
             ORACLE_SECS,
@@ -153,10 +125,6 @@ contract OptionsTokenTest is Common {
         IOracle[] memory oracles = new IOracle[](2);
         oracles[0] = IOracle(address(underlyingPaymentOracle));
         oracles[1] = IOracle(address(paymentWantOracle));
-
-        /* Set up contracts */
-        underlyingPaymentOracle.setTwapValue(initTwap);
-        paymentWantOracle.setTwapValue(25e20); // 2500
 
         /* Option token deployment */
         vm.startPrank(owner);
@@ -174,7 +142,7 @@ contract OptionsTokenTest is Common {
             owner,
             paymentToken,
             underlyingToken,
-            oracle,
+            underlyingPaymentOracle,
             PRICE_MULTIPLIER,
             treasuries,
             feeBPS
@@ -196,6 +164,7 @@ contract OptionsTokenTest is Common {
             address(optionsTokenProxy),
             OP_POOL_ADDRESSES_PROVIDER_V2,
             targetLTV,
+            1000, // 10%
             swapProps,
             oracles
         );
@@ -217,6 +186,7 @@ contract OptionsTokenTest is Common {
             OP_DATA_PROVIDER,
             REWARDER,
             address(optionsTokenProxy),
+            1000, // 10%
             swapProps,
             oracles
         );
@@ -249,51 +219,12 @@ contract OptionsTokenTest is Common {
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
         underlyingToken.transfer(address(exerciser), underlyingBalance);
 
+        /* Set up contracts - added here to calculate initTwap after swap */
+        underlyingPaymentMock.setTwapValue(initTwap);
+        // Question: Had to decrease a lot the price from the real one
+        // 1e18 = 25e20 => 25e8 USDC with 6 decimals
+        paymentWantMock.setTwapValue(21e8); // 1 ETH = 2100 USDC (4e14)
         paymentToken.approve(address(exerciser), type(uint256).max);
-    }
-
-    function test_accessControlFunctionsChecks(
-        address hacker,
-        address randomOption,
-        uint256 amount
-    ) public {
-        /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
-        vm.assume(
-            hacker != tokenAdmin &&
-                hacker != keeper &&
-                hacker != management1 &&
-                hacker != management2 &&
-                hacker != management3
-        );
-
-        /* Hacker tries to perform harvest */
-        vm.startPrank(hacker);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyKeeperAllowed()"))
-        );
-        strategySonneProxy.harvestOTokens(
-            amount,
-            address(exerciser),
-            NON_ZERO_PROFIT
-        );
-
-        /* Hacker tries to manipulate contract configuration */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
-        );
-        strategySonneProxy.setOptionToken(randomOption);
-        vm.stopPrank();
-
-        /* Admin tries to set different option token */
-        vm.startPrank(owner);
-        strategySonneProxy.setOptionToken(randomOption);
-        vm.stopPrank();
-        assertEq(address(strategySonneProxy.optionToken()), randomOption);
     }
 
     function test_flashloanPositiveScenarioSonne(uint256 amount) public {
@@ -411,6 +342,89 @@ contract OptionsTokenTest is Common {
         );
     }
 
+    function test_accessControlFunctionsChecks(
+        address hacker,
+        address randomOption,
+        uint256 amount
+    ) public {
+        /* Test vectors definition */
+        amount = bound(
+            amount,
+            MIN_OATH_FOR_FUZZING,
+            underlyingToken.balanceOf(address(exerciser))
+        );
+        vm.assume(
+            hacker != owner &&
+                hacker != keeper &&
+                hacker != management1 &&
+                hacker != management2 &&
+                hacker != management3
+        );
+        SwapProps[] memory swapProps = new SwapProps[](2);
+        IOracle[] memory oracles = new IOracle[](2);
+        /* Hacker tries to perform harvest */
+        vm.startPrank(hacker);
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__OnlyKeeperAllowed()"))
+        );
+        strategySonneProxy.harvestOTokens(
+            amount,
+            address(exerciser),
+            NON_ZERO_PROFIT
+        );
+
+        /* Hacker tries to manipulate contract configuration */
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
+        );
+        strategySonneProxy.setOptionToken(randomOption);
+
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
+        );
+        strategySonneProxy.configSwapProps(swapProps);
+
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
+        );
+        strategySonneProxy.setOracles(oracles);
+
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
+        );
+        strategySonneProxy.setMaxSwapSlippage(10000);
+        vm.stopPrank();
+
+        /* Admin tries to set different option token */
+        vm.startPrank(owner);
+        strategySonneProxy.setOptionToken(randomOption);
+        vm.stopPrank();
+        assertEq(address(strategySonneProxy.optionToken()), randomOption);
+    }
+
+    function test_wrongLengthOfParams(uint256 paramsLength) public {
+        /* Test vectors definition */
+        paramsLength = bound(paramsLength, 0, 10);
+        vm.assume(paramsLength != strategySonneProxy.requiredParamsLength());
+
+        SwapProps[] memory swapProps = new SwapProps[](paramsLength);
+        IOracle[] memory oracles = new IOracle[](paramsLength);
+
+        /* Hacker tries to perform harvest */
+        vm.startPrank(management1);
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()"))
+        );
+        strategySonneProxy.configSwapProps(swapProps);
+
+        /* Hacker tries to manipulate contract configuration */
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()"))
+        );
+        strategySonneProxy.setOracles(oracles);
+        vm.stopPrank();
+    }
+
     function test_flashloanNegativeScenario_highTwapValueAndMultiplier(
         uint256 amount
     ) public {
@@ -436,9 +450,7 @@ contract OptionsTokenTest is Common {
         exerciser.setMultiplier(9999);
         vm.stopPrank();
         /* Increase TWAP price to make flashloan not profitable */
-        underlyingPaymentOracle.setTwapValue(
-            initTwap + ((initTwap * 10) / 100)
-        );
+        underlyingPaymentMock.setTwapValue(initTwap + ((initTwap * 10) / 100));
 
         /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
         vm.expectRevert(

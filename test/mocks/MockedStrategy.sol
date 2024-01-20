@@ -59,12 +59,14 @@ contract MockedStrategy is OptionsCompounder {
         address _want,
         address _optionsToken,
         address _addressProvider,
-        SwapProps memory _swapProps,
+        uint256 _maxSwapSlippage,
+        SwapProps[] memory _swapProps,
         IOracle[] memory _oracles
     ) public initializer {
         __OptionsCompounder_init(
             _optionsToken,
             _addressProvider,
+            _maxSwapSlippage,
             _swapProps,
             _oracles
         );

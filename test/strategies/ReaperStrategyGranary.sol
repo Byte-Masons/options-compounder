@@ -73,7 +73,8 @@ contract ReaperStrategyGranary is
         address _dataProvider,
         address _rewarder,
         address _optionsToken,
-        SwapProps memory _swapProps,
+        uint256 _maxSwapSlippage,
+        SwapProps[] memory _swapProps,
         IOracle[] memory _oracles
     ) public initializer {
         gWant = _gWant;
@@ -89,6 +90,7 @@ contract ReaperStrategyGranary is
         __OptionsCompounder_init(
             _optionsToken,
             _addressProvider,
+            _maxSwapSlippage,
             _swapProps,
             _oracles
         );

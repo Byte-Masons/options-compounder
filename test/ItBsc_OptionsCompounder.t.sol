@@ -20,33 +20,15 @@ import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 import {RouterV2} from "./strategies/interfaces/RouterV2.sol";
 
 contract OptionsTokenTest is Common {
-    enum TestChain {
-        OPTIMISM,
-        BSC
-    }
-
-    TestChain testChain = TestChain.BSC;
-
     using FixedPointMathLib for uint256;
 
     /* Variable assignment (depends on chain) */
+    uint256 constant FORK_BLOCK = 35406073;
     string MAINNET_URL = vm.envString("BSC_RPC_URL_MAINNET");
-    IRToken rusdc = IRToken(BSC_RUSDC);
-
-    ExchangeType exchangeType = ExchangeType.VeloSolid;
-
-    address owner;
-    address tokenAdmin;
-    address[] treasuries;
-    uint256[] feeBPS;
-    address strategist = address(4);
-    address vault;
-    address management1;
-    address management2;
-    address management3;
-    address keeper;
 
     /* Contract variables */
+    IRToken rusdc;
+
     OptionsToken optionsToken;
     ERC1967Proxy tmpProxy;
     OptionsToken optionsTokenProxy;
@@ -57,34 +39,24 @@ contract OptionsTokenTest is Common {
     MockedLendingPool lendingPool;
     MockedStrategy strategy;
     Helper helper;
-    uint256 initTwap = 0;
+    uint256 initTwap;
 
     function setUp() public {
         /* Common assignments */
+        ExchangeType exchangeType = ExchangeType.VeloSolid;
+        rusdc = IRToken(BSC_RUSDC);
         nativeToken = IERC20(BSC_WBNB);
         paymentToken = nativeToken;
         underlyingToken = IERC20(BSC_THENA);
-        wantToken = IERC20(0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d); // IERC20(rusdc.UNDERLYING_ASSET_ADDRESS());
+        wantToken = IERC20(BSC_BUSD);
 
         /* Setup accounts */
-        owner = makeAddr("owner");
-        tokenAdmin = makeAddr("tokenAdmin");
-        treasuries = new address[](2);
-        treasuries[0] = makeAddr("treasury1");
-        treasuries[1] = makeAddr("treasury2");
-        vault = makeAddr("vault");
-        management1 = makeAddr("management1");
-        management2 = makeAddr("management2");
-        management3 = makeAddr("management3");
-        keeper = makeAddr("keeper");
-        feeBPS = new uint256[](2);
-        feeBPS[0] = 0;
-        feeBPS[1] = 0;
+        fixture_setupAccountsAndFees(100, 2000);
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
         /* Setup network */
-        uint256 bscFork = vm.createFork(MAINNET_URL); //, FORK_BLOCK);
+        uint256 bscFork = vm.createFork(MAINNET_URL, FORK_BLOCK);
         vm.selectFork(bscFork);
 
         /* Setup roles */
@@ -100,10 +72,9 @@ contract OptionsTokenTest is Common {
         /* Variables */
         RouterV2 router = RouterV2(payable(BSC_VELO_ROUTER));
 
-        SwapProps memory swapProps = SwapProps(
-            BSC_VELO_ROUTER,
-            ExchangeType.VeloSolid
-        );
+        SwapProps[] memory swapProps = new SwapProps[](2);
+        swapProps[0] = SwapProps(BSC_VELO_ROUTER, ExchangeType.VeloSolid);
+        swapProps[1] = SwapProps(BSC_VELO_ROUTER, ExchangeType.VeloSolid);
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -184,6 +155,7 @@ contract OptionsTokenTest is Common {
             address(wantToken),
             address(optionsTokenProxy),
             address(lendingPool),
+            300, // 3%
             swapProps,
             oracles
         );
@@ -199,7 +171,7 @@ contract OptionsTokenTest is Common {
         );
         paymentToken.approve(address(reaperSwapper), AMOUNT);
         console2.log(
-            "Balance of underlying: ",
+            "1. Balance of underlying: ",
             underlyingToken.balanceOf(address(this))
         );
         reaperSwapper.swapVelo(
@@ -211,7 +183,7 @@ contract OptionsTokenTest is Common {
             type(uint256).max
         );
         console2.log(
-            "Balance of underlying: ",
+            "2. Balance of underlying: ",
             underlyingToken.balanceOf(address(this))
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
@@ -227,7 +199,7 @@ contract OptionsTokenTest is Common {
         paymentToken.approve(address(exerciser), type(uint256).max);
     }
 
-    function test_flashloanPositiveScenario(uint256 amount) public {
+    function test_bscFlashloanPositiveScenario(uint256 amount) public {
         /* Test vectors definition */
         amount = bound(
             amount,
