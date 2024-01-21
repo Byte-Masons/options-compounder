@@ -10,6 +10,8 @@ import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {UtMock} from "./mocks/UtMock.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperSwapper.sol";
+import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
+import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 
 contract OptionsTokenTest is Test {
     using FixedPointMathLib for uint256;
@@ -106,6 +108,7 @@ contract OptionsTokenTest is Test {
         wantAmount = bound(wantAmount, minWantAmount, UINT256_MAX);
 
         /* Initialization of variables */
+        SwapProps[] memory swapProps = new SwapProps[](2);
         uint256 targetLTV = 0.0001 ether;
         address[] memory strategists = new address[](1);
         address[] memory multisigRoles = new address[](3);
@@ -131,6 +134,11 @@ contract OptionsTokenTest is Test {
             address(strategySonneProxy),
             factor
         );
+        swapProps[0] = SwapProps(address(utMock), ExchangeType.Bal);
+        swapProps[1] = SwapProps(address(utMock), ExchangeType.Bal);
+        IOracle[] memory oracles = new IOracle[](2);
+        oracles[0] = IOracle(address(utMock));
+        oracles[1] = IOracle(address(utMock));
         strategySonneProxy.initialize(
             vault,
             address(utMock),
@@ -140,7 +148,10 @@ contract OptionsTokenTest is Test {
             address(utMock),
             address(utMock),
             address(utMock),
-            targetLTV
+            targetLTV,
+            1000,
+            swapProps,
+            oracles
         );
         vm.stopPrank();
 
@@ -237,6 +248,7 @@ contract OptionsTokenTest is Test {
 
         /* Initialization of variables */
         uint256 targetLTV = 0.0001 ether;
+        SwapProps[] memory swapProps = new SwapProps[](2);
         address[] memory strategists = new address[](1);
         address[] memory multisigRoles = new address[](3);
         address[] memory keepers = new address[](1);
@@ -261,6 +273,11 @@ contract OptionsTokenTest is Test {
             address(strategySonneProxy),
             factor
         );
+        swapProps[0] = SwapProps(address(utMock), ExchangeType.Bal);
+        swapProps[1] = SwapProps(address(utMock), ExchangeType.Bal);
+        IOracle[] memory oracles = new IOracle[](2);
+        oracles[0] = IOracle(address(utMock));
+        oracles[1] = IOracle(address(utMock));
         strategySonneProxy.initialize(
             vault,
             address(utMock),
@@ -270,7 +287,10 @@ contract OptionsTokenTest is Test {
             address(utMock),
             address(utMock),
             address(utMock),
-            targetLTV
+            targetLTV,
+            1000,
+            swapProps,
+            oracles
         );
         vm.stopPrank();
 
@@ -367,6 +387,7 @@ contract OptionsTokenTest is Test {
         vm.startPrank(owner);
 
         /* Option compounder deployment */
+        SwapProps[] memory swapProps = new SwapProps[](2);
         strategySonne = new ReaperStrategySonne();
         tmpProxy = new ERC1967Proxy(address(strategySonne), "");
         strategySonneProxy = ReaperStrategySonne(address(tmpProxy));
@@ -380,6 +401,11 @@ contract OptionsTokenTest is Test {
             address(strategySonneProxy),
             factor
         );
+        swapProps[0] = SwapProps(address(utMock), ExchangeType.Bal);
+        swapProps[1] = SwapProps(address(utMock), ExchangeType.Bal);
+        IOracle[] memory oracles = new IOracle[](2);
+        oracles[0] = IOracle(address(utMock));
+        oracles[1] = IOracle(address(utMock));
         strategySonneProxy.initialize(
             vault,
             address(utMock),
@@ -389,7 +415,10 @@ contract OptionsTokenTest is Test {
             address(utMock),
             address(utMock),
             address(utMock),
-            targetLTV
+            targetLTV,
+            1000,
+            swapProps,
+            oracles
         );
         vm.stopPrank();
 
