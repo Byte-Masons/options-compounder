@@ -3,8 +3,6 @@
  */
 
 // SPDX-License-Identifier: BUSL1.1
-import "forge-std/Test.sol";
-import {RouterV2} from "../strategies/interfaces/RouterV2.sol";
 
 pragma solidity ^0.8.0;
 
@@ -2119,6 +2117,7 @@ abstract contract BalMixin is ISwapErrors {
 
         bytes32 poolId = balSwapPoolIDs[_from][_to][_vault];
         require(poolId != bytes32(0), "Missing pool for swap");
+
         IBeetVault.SingleSwap memory singleSwap;
         singleSwap.poolId = poolId;
         singleSwap.kind = IBeetVault.SwapKind.GIVEN_IN;
@@ -2137,6 +2136,7 @@ abstract contract BalMixin is ISwapErrors {
             address(this),
             _vault
         );
+
         // Linear pool tokens have infinite allowance for the vault by default.
         if (_amount > currentAllowance) {
             IERC20(_from).safeIncreaseAllowance(
@@ -2144,7 +2144,6 @@ abstract contract BalMixin is ISwapErrors {
                 _amount - currentAllowance
             );
         }
-        currentAllowance = IERC20(_from).allowance(address(this), _vault);
 
         try
             IBeetVault(_vault).swap(singleSwap, funds, _minAmountOut, _deadline)
@@ -2172,7 +2171,6 @@ abstract contract BalMixin is ISwapErrors {
         );
         IERC20[] memory poolTokens;
         (poolTokens, , ) = IBeetVault(_vault).getPoolTokens(_poolID);
-
         bool tokenInFound;
         bool tokenOutFound;
 
@@ -2792,12 +2790,12 @@ abstract contract VeloSolidMixin is ISwapErrors {
         address indexed from,
         address indexed to,
         address indexed router,
-        RouterV2.route[] path
+        IVeloRouter.Route[] path
     );
 
     /// @dev tokenA => (tokenB => (router => path): returns best path to swap
     ///         tokenA to tokenB for the given router (protocol)
-    mapping(address => mapping(address => mapping(address => RouterV2.route[])))
+    mapping(address => mapping(address => mapping(address => IVeloRouter.Route[])))
         public veloSwapPaths;
 
     /// @dev Helper function to swap {_from} to {_to} given an {_amount}.
@@ -2812,11 +2810,11 @@ abstract contract VeloSolidMixin is ISwapErrors {
         if (_from == _to || _amount == 0) {
             return 0;
         }
-        RouterV2.route[] storage path = veloSwapPaths[_from][_to][_router];
+        IVeloRouter.Route[] storage path = veloSwapPaths[_from][_to][_router];
         require(path.length != 0, "Missing path for swap");
 
         uint256 predictedOutput;
-        RouterV2 router = RouterV2(payable(_router));
+        IVeloRouter router = IVeloRouter(_router);
         try router.getAmountsOut(_amount, path) returns (
             uint256[] memory amounts
         ) {
@@ -2883,7 +2881,7 @@ abstract contract VeloSolidMixin is ISwapErrors {
         address _tokenIn,
         address _tokenOut,
         address _router,
-        RouterV2.route[] memory _path
+        IVeloRouter.Route[] memory _path
     ) internal {
         require(
             _tokenIn != _tokenOut &&
@@ -2893,19 +2891,19 @@ abstract contract VeloSolidMixin is ISwapErrors {
         );
         delete veloSwapPaths[_tokenIn][_tokenOut][_router];
         for (uint256 i = 0; i < _path.length; i++) {
-            // if (i < _path.length - 1) {
-            //     require(_path[i].to == _path[i + 1].from);
-            //     IVeloV1AndV2Factory factory = IVeloV1AndV2Factory(
-            //         _path[i].factory
-            //     );
-            //     address pair = factory.getPair(
-            //         _path[i].from,
-            //         _path[i].to,
-            //         _path[i].stable
-            //     );
-            //     bool isPair = factory.isPair(pair);
-            //     require(isPair);
-            // }
+            if (i < _path.length - 1) {
+                require(_path[i].to == _path[i + 1].from);
+                IVeloV1AndV2Factory factory = IVeloV1AndV2Factory(
+                    _path[i].factory
+                );
+                address pair = factory.getPair(
+                    _path[i].from,
+                    _path[i].to,
+                    _path[i].stable
+                );
+                bool isPair = factory.isPair(pair);
+                require(isPair);
+            }
             veloSwapPaths[_tokenIn][_tokenOut][_router].push(_path[i]);
         }
         emit VeloSwapPathUpdated(_tokenIn, _tokenOut, _router, _path);
@@ -2916,7 +2914,7 @@ abstract contract VeloSolidMixin is ISwapErrors {
         address _tokenIn,
         address _tokenOut,
         address _router,
-        RouterV2.route[] memory _path
+        IVeloRouter.Route[] memory _path
     ) external virtual;
 }
 
@@ -3037,7 +3035,7 @@ interface ISwapper is ISwapperSwaps {
         address _to,
         address _router,
         uint256 _index
-    ) external returns (RouterV2.route memory route);
+    ) external returns (IVeloRouter.Route memory route);
 
     function uniV3SwapPaths(
         address _from,
@@ -3065,7 +3063,7 @@ interface ISwapper is ISwapperSwaps {
         address _tokenIn,
         address _tokenOut,
         address _router,
-        RouterV2.route[] memory _path
+        IVeloRouter.Route[] memory _path
     ) external;
 
     function updateUniV3SwapPath(
@@ -6147,13 +6145,7 @@ contract ReaperSwapper is
     mapping(address => CLAggregatorData) public aggregatorData;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(
-        address[] memory _strategists,
-        address _guardian,
-        address _superAdmin
-    ) initializer {
-        initialize(_strategists, _guardian, _superAdmin);
-    }
+    constructor() initializer {}
 
     function initialize(
         address[] memory _strategists,
@@ -6198,7 +6190,7 @@ contract ReaperSwapper is
         address _tokenIn,
         address _tokenOut,
         address _router,
-        RouterV2.route[] memory _path
+        IVeloRouter.Route[] memory _path
     ) external override {
         _atLeastRole(STRATEGIST);
         _updateVeloSwapPath(_tokenIn, _tokenOut, _router, _path);

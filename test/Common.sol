@@ -5,7 +5,7 @@ pragma solidity ^0.8.0;
 import "forge-std/Test.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 // import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter, RouterV2} from "./mocks/ReaperSwapper.sol";
+import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter} from "./mocks/ReaperSwapper.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 
@@ -44,8 +44,8 @@ address constant BSC_BUSD = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
 address constant BSC_RUSDC = 0x3bDCEf9e656fD9D03eA98605946b4fbF362C342b;
 address constant BSC_THENA = 0xF4C8E32EaDEC4BFe97E0F595AdD0f4450a863a11;
 address constant BSC_WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
-address constant BSC_VELO_ROUTER = 0xd4ae6eCA985340Dd434D38F470aCCce4DC78D109;
-address constant BSC_VELO_FACTORY = 0x2c788FE40A417612cb654b14a944cd549B5BF130;
+address constant BSC_THENA_ROUTER = 0xd4ae6eCA985340Dd434D38F470aCCce4DC78D109;
+address constant BSC_THENA_FACTORY = 0x2c788FE40A417612cb654b14a944cd549B5BF130;
 
 contract Common is Test {
     IERC20 nativeToken;
@@ -54,8 +54,6 @@ contract Common is Test {
     IERC20 wantToken;
 
     ReaperSwapper reaperSwapper;
-    address veloRouter = BSC_VELO_ROUTER;
-    address veloFactory = BSC_VELO_FACTORY;
     bytes32 paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
     bytes32 paymentWantBpt = OP_BTC_WETH_USDC_BPT;
     address balancerVault = OP_BEETX_VAULT;
@@ -123,42 +121,6 @@ contract Common is Test {
                 address(wantToken),
                 balancerVault,
                 paymentWantBpt
-            );
-        } else if (_exchangeType == ExchangeType.VeloSolid) {
-            /* configure velo like dexes */
-            RouterV2.route[] memory path = new RouterV2.route[](1);
-            path[0] = RouterV2.route(
-                address(paymentToken),
-                address(underlyingToken),
-                false
-            );
-            reaperSwapper.updateVeloSwapPath(
-                address(paymentToken),
-                address(underlyingToken),
-                veloRouter,
-                path
-            );
-            path[0] = RouterV2.route(
-                address(underlyingToken),
-                address(paymentToken),
-                false
-            );
-            reaperSwapper.updateVeloSwapPath(
-                address(underlyingToken),
-                address(paymentToken),
-                veloRouter,
-                path
-            );
-            path[0] = RouterV2.route(
-                address(paymentToken),
-                address(wantToken),
-                false
-            );
-            reaperSwapper.updateVeloSwapPath(
-                address(paymentToken),
-                address(wantToken),
-                veloRouter,
-                path
             );
         }
     }

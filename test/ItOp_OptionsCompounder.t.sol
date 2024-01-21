@@ -21,7 +21,7 @@ import {IAToken} from "./strategies/interfaces/IAToken.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 
 // import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter, RouterV2} from "./mocks/ReaperSwapper.sol";
+import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperSwapper.sol";
 
 contract OptionsTokenTest is Common {
     using FixedPointMathLib for uint256;
@@ -85,11 +85,10 @@ contract OptionsTokenTest is Common {
         helper = new Helper();
 
         /* Reaper deployment and configuration */
-        reaperSwapper = new ReaperSwapper(
-            strategists,
-            address(this),
-            address(this)
-        );
+        reaperSwapper = new ReaperSwapper();
+        tmpProxy = new ERC1967Proxy(address(reaperSwapper), "");
+        reaperSwapper = ReaperSwapper(address(tmpProxy));
+        reaperSwapper.initialize(strategists, address(this), address(this));
 
         /* Configure swapper */
         fixture_configureSwapper(exchangeType);
@@ -148,7 +147,12 @@ contract OptionsTokenTest is Common {
             feeBPS
         );
         /* Add exerciser to the list of options */
+
         optionsTokenProxy.setExerciseContract(address(exerciser), true);
+
+        uint256[] memory slippages = new uint256[](2);
+        slippages[0] = 200; // 2%
+        slippages[1] = 1000; // 10%
 
         /* Sonne strategy deployment */
         strategySonne = new ReaperStrategySonne();
@@ -164,7 +168,7 @@ contract OptionsTokenTest is Common {
             address(optionsTokenProxy),
             OP_POOL_ADDRESSES_PROVIDER_V2,
             targetLTV,
-            1000, // 10%
+            slippages,
             swapProps,
             oracles
         );
@@ -186,7 +190,7 @@ contract OptionsTokenTest is Common {
             OP_DATA_PROVIDER,
             REWARDER,
             address(optionsTokenProxy),
-            1000, // 10%
+            slippages,
             swapProps,
             oracles
         );
@@ -200,10 +204,6 @@ contract OptionsTokenTest is Common {
             0
         );
         paymentToken.approve(address(reaperSwapper), AMOUNT);
-        console2.log(
-            "Balance of underlying: ",
-            underlyingToken.balanceOf(address(this))
-        );
         reaperSwapper.swapBal(
             address(paymentToken),
             address(underlyingToken),
@@ -211,19 +211,14 @@ contract OptionsTokenTest is Common {
             minAmountOutData,
             OP_BEETX_VAULT
         );
-        console2.log(
-            "Balance of underlying: ",
-            underlyingToken.balanceOf(address(this))
-        );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
         underlyingToken.transfer(address(exerciser), underlyingBalance);
 
         /* Set up contracts - added here to calculate initTwap after swap */
         underlyingPaymentMock.setTwapValue(initTwap);
-        // Question: Had to decrease a lot the price from the real one
-        // 1e18 = 25e20 => 25e8 USDC with 6 decimals
-        paymentWantMock.setTwapValue(21e8); // 1 ETH = 2100 USDC (4e14)
+        // 1e18 = 25e20 => 25e8 USDC with 6 decimals (4e14)
+        paymentWantMock.setTwapValue(22e8); // 1 ETH = 2200 USDC
         paymentToken.approve(address(exerciser), type(uint256).max);
     }
 
@@ -392,7 +387,10 @@ contract OptionsTokenTest is Common {
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
         );
-        strategySonneProxy.setMaxSwapSlippage(10000);
+        uint256[] memory slippages = new uint256[](2);
+        slippages[0] = 1000;
+        slippages[0] = 2000;
+        strategySonneProxy.setMaxSwapSlippage(slippages);
         vm.stopPrank();
 
         /* Admin tries to set different option token */
