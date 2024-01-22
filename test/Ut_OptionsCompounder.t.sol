@@ -33,6 +33,7 @@ contract OptionsTokenTest is Test {
     address management2;
     address management3;
     address keeper;
+    uint256[] slippages;
 
     /* Contract variables */
     ERC1967Proxy tmpProxy;
@@ -56,6 +57,9 @@ contract OptionsTokenTest is Test {
         feeBPS[1] = 2000;
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
+        slippages = new uint256[](2);
+        slippages[0] = 100; // 1%
+        slippages[1] = 900; // 9%
     }
 
     function test_utFlashloanPositiveScenario(
@@ -139,6 +143,7 @@ contract OptionsTokenTest is Test {
         IOracle[] memory oracles = new IOracle[](2);
         oracles[0] = IOracle(address(utMock));
         oracles[1] = IOracle(address(utMock));
+
         strategySonneProxy.initialize(
             vault,
             address(utMock),
@@ -149,7 +154,7 @@ contract OptionsTokenTest is Test {
             address(utMock),
             address(utMock),
             targetLTV,
-            1000,
+            slippages,
             swapProps,
             oracles
         );
@@ -278,6 +283,7 @@ contract OptionsTokenTest is Test {
         IOracle[] memory oracles = new IOracle[](2);
         oracles[0] = IOracle(address(utMock));
         oracles[1] = IOracle(address(utMock));
+
         strategySonneProxy.initialize(
             vault,
             address(utMock),
@@ -288,7 +294,7 @@ contract OptionsTokenTest is Test {
             address(utMock),
             address(utMock),
             targetLTV,
-            1000,
+            slippages,
             swapProps,
             oracles
         );
@@ -416,7 +422,7 @@ contract OptionsTokenTest is Test {
             address(utMock),
             address(utMock),
             targetLTV,
-            1000,
+            slippages,
             swapProps,
             oracles
         );

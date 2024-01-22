@@ -56,7 +56,7 @@ contract OptionsTokenTest is Common {
         vm.deal(owner, AMOUNT * 3);
 
         /* Setup network */
-        uint256 bscFork = vm.createFork(MAINNET_URL, FORK_BLOCK);
+        uint256 bscFork = vm.createFork(MAINNET_URL); //FORK_BLOCK);
         vm.selectFork(bscFork);
 
         /* Setup roles */
@@ -80,11 +80,10 @@ contract OptionsTokenTest is Common {
         helper = new Helper();
 
         /* Reaper deployment and configuration */
-        reaperSwapper = new ReaperSwapper(
-            strategists,
-            address(this),
-            address(this)
-        );
+        reaperSwapper = new ReaperSwapper();
+        tmpProxy = new ERC1967Proxy(address(reaperSwapper), "");
+        reaperSwapper = ReaperSwapper(address(tmpProxy));
+        reaperSwapper.initialize(strategists, address(this), address(this));
 
         /* Configure swapper */
         fixture_configureSwapper(exchangeType);
@@ -148,6 +147,9 @@ contract OptionsTokenTest is Common {
         optionsTokenProxy.setExerciseContract(address(exerciser), true);
 
         /* Strategy deployment */
+        uint256[] memory slippages = new uint256[](2);
+        slippages[0] = 200; // 2%
+        slippages[1] = 400; // 4%
         lendingPool = new MockedLendingPool();
         strategy = new MockedStrategy();
         strategy.__MockedStrategy_init(
@@ -155,7 +157,7 @@ contract OptionsTokenTest is Common {
             address(wantToken),
             address(optionsTokenProxy),
             address(lendingPool),
-            300, // 3%
+            slippages, // 3%
             swapProps,
             oracles
         );

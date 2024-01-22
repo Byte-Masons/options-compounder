@@ -6147,13 +6147,7 @@ contract ReaperSwapper is
     mapping(address => CLAggregatorData) public aggregatorData;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(
-        address[] memory _strategists,
-        address _guardian,
-        address _superAdmin
-    ) initializer {
-        initialize(_strategists, _guardian, _superAdmin);
-    }
+    constructor() initializer {}
 
     function initialize(
         address[] memory _strategists,
