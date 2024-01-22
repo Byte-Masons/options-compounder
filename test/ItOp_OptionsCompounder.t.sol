@@ -407,19 +407,28 @@ contract OptionsTokenTest is Common {
 
         SwapProps[] memory swapProps = new SwapProps[](paramsLength);
         IOracle[] memory oracles = new IOracle[](paramsLength);
+        uint256[] memory maxSwapSlippages = new uint256[](2);
+        maxSwapSlippages[0] = 10000;
+        maxSwapSlippages[1] = 10001;
 
-        /* Hacker tries to perform harvest */
+        /* Passing wrong number of elements into configSwapProps */
         vm.startPrank(management1);
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()"))
         );
         strategySonneProxy.configSwapProps(swapProps);
 
-        /* Hacker tries to manipulate contract configuration */
+        /* Passing wrong number of elements into setOracles */
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()"))
         );
         strategySonneProxy.setOracles(oracles);
+        /* Passing wrong number setMaxSwapSlippage */
+        vm.expectRevert(
+            bytes4(keccak256("OptionsCompounder__SlippageGreaterThanMax()"))
+        );
+        strategySonneProxy.setMaxSwapSlippage(maxSwapSlippages);
+
         vm.stopPrank();
     }
 

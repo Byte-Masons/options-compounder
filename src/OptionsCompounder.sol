@@ -293,7 +293,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             oracles.length
         );
 
-        /* Get underlying and payment tokens again to make sure there is no change between 
+        /* Get underlying and payment tokens to make sure there is no change between 
         harvest and excersice */
         IERC20 underlyingToken = DiscountExercise(exerciserContract)
             .underlyingToken();
@@ -348,7 +348,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         if ((assetBalance - initialBalance) <= totalAmountToPay) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
-        /* Protected by statement above */
+        /* Protected against underflows by statement above */
         gainInPaymentToken = (assetBalance - initialBalance) - totalAmountToPay;
 
         /* Approve the underlying token to make swap */
@@ -374,7 +374,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         }
         gainInWantToken =
             IERC20(wantToken()).balanceOf(address(this)) -
-            initialWantBalance; // - inital balance from the begining
+            initialWantBalance;
         if (gainInWantToken < minWantAmount) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
@@ -396,7 +396,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     ) private view returns (MinAmountOutData memory) {
         MinAmountOutData memory minAmountOutData;
         uint256 minAmountOut = 0;
+        /* Get price from oracle */
         uint256 price = oracles[uint256(_idx)].getPrice();
+        /* Deduct slippage amount from predicted amount */
         minAmountOut = ((_amountIn.mulWadUp(price)) -
             (((_amountIn.mulWadUp(price)) * _maxSlippage) / PERCENTAGE));
         minAmountOutData = MinAmountOutData(
@@ -473,6 +475,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         return lendingPool;
     }
 
+    /** @dev Returns number of params needed to pass through swapProps, oracles and maxSwapSlippages */
     function requiredParamsLength() external pure returns (uint256) {
         return uint256(SwapIdx.MAX);
     }
