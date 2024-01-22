@@ -12,7 +12,8 @@ import {SafeERC20Upgradeable} from "oz-upgradeable/token/ERC20/utils/SafeERC20Up
 import {IERC20Upgradeable} from "oz-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import {MathUpgradeable} from "oz-upgradeable/utils/math/MathUpgradeable.sol";
 import {ReaperMathUtils} from "vault-v2/libraries/ReaperMathUtils.sol";
-import {OptionsCompounder} from "./OptionsCompounder.sol";
+import {SwapProps, OptionsCompounder} from "../../src/OptionsCompounder.sol";
+import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 
 /**
  * @dev This strategy will deposit a token on Sonne to maximize yield
@@ -67,9 +68,12 @@ contract ReaperStrategySonne is
         address[] memory _multisigRoles,
         address[] memory _keepers,
         address _cWant,
-        address _optionToken,
+        address _optionsToken,
         address _addressProvider,
-        uint256 _targetLTV
+        uint256 _targetLTV,
+        uint256[] memory _maxSwapSlippages,
+        SwapProps[] memory _swapProps,
+        IOracle[] memory _oracles
     ) public initializer {
         cWant = CErc20I(_cWant);
         __ReaperBaseStrategy_init(
@@ -80,13 +84,12 @@ contract ReaperStrategySonne is
             _multisigRoles,
             _keepers
         );
-        // Question: Should be nested deeper ?
         __OptionsCompounder_init(
-            _optionToken,
+            _optionsToken,
             _addressProvider,
-            _swapper,
-            cWant.underlying(),
-            _multisigRoles
+            _maxSwapSlippages,
+            _swapProps,
+            _oracles
         );
         markets = [_cWant];
         comptroller = IComptroller(cWant.comptroller());
@@ -607,5 +610,52 @@ contract ReaperStrategySonne is
     modifier doUpdateBalance() {
         _;
         updateBalance();
+    }
+
+    /* Override functions */
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Want token of the strategy
+     */
+    function wantToken() internal view virtual override returns (address) {
+        return want;
+    }
+
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Swapper contract used in the strategy
+     */
+    function swapperSwaps() internal view virtual override returns (address) {
+        return address(swapper);
+    }
+
+    /**
+     * @dev Subclasses should override this to specify their unique role-checking criteria.
+     * @return Returns bool value. {true} if {_account} has been granted {_role}.
+     */
+    function hasRoleForOptionsCompounder(
+        bytes32 _role,
+        address _account
+    ) internal view override returns (bool) {
+        return hasRole(_role, _account);
+    }
+
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Keeper role of the strategy
+     * */
+    function getKeeperRole() internal pure override returns (bytes32) {
+        return KEEPER;
+    }
+
+    /**
+     * @dev Shall be implemented in the parent contract
+     * @return Admin roles of the strategy
+     * */
+    function getAdminRoles() internal pure override returns (bytes32[] memory) {
+        bytes32[] memory admins = new bytes32[](2);
+        admins[0] = ADMIN;
+        admins[1] = DEFAULT_ADMIN_ROLE;
+        return admins;
     }
 }

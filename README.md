@@ -1,7 +1,6 @@
-# OptionsToken
+# OptionsToken Compounder
 
-An options token representing the right to purchase the underlying token at an oracle-specified rate. It's similar to a call option but with a variable strike price that's always at a certain discount to the market price.
-It also has no expiry date.
+A token with options that grant the holder the ability to acquire the base token at a rate specified by an oracle. Resembling a call option, it differs in having a strike price consistently set at a specific discount to the market rate and it lacks an expiration date. The Compounder platform facilitates the utilization of flash loans to exercise the option, enabling the acquisition of the underlying token at a discounted rate via payment token.
 
 ## Installation
 

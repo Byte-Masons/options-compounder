@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0
 
 pragma solidity ^0.8.0;
 
@@ -16,9 +16,7 @@ contract Helper {
     /** Function to get WETH from ETH
      * @param wethAddress - address of WETH contract (0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 for mainnet)
      */
-    function getWethFromEth(
-        address wethAddress
-    ) external payable returns (uint256) {
+    function wrapEth(address wethAddress) external payable returns (uint256) {
         IWeth wEth = IWeth(wethAddress);
         wEth.deposit{value: msg.value}();
         //wEth.approve(msg.sender, wEth.balanceOf(address(this)));
