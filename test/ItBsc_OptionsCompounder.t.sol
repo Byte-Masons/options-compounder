@@ -13,7 +13,6 @@ import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {IAToken} from "./strategies/interfaces/IAToken.sol";
-import {IRToken} from "./strategies/interfaces/IRToken.sol";
 import {MockedLendingPool, MockedStrategy} from "./mocks/MockedStrategy.sol";
 import {ThenaOracle, IThenaPair} from "optionsToken/src/oracles/ThenaOracle.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
@@ -27,7 +26,6 @@ contract OptionsTokenTest is Common {
     string MAINNET_URL = vm.envString("BSC_RPC_URL_MAINNET");
 
     /* Contract variables */
-    IRToken rusdc;
 
     OptionsToken optionsToken;
     ERC1967Proxy tmpProxy;
@@ -43,12 +41,12 @@ contract OptionsTokenTest is Common {
 
     function setUp() public {
         /* Common assignments */
-        ExchangeType exchangeType = ExchangeType.VeloSolid;
-        rusdc = IRToken(BSC_RUSDC);
+        ExchangeType exchangeType = ExchangeType.ThenaRam;
         nativeToken = IERC20(BSC_WBNB);
         paymentToken = nativeToken;
         underlyingToken = IERC20(BSC_THENA);
         wantToken = IERC20(BSC_BUSD);
+        thenaRamRouter = IThenaRamRouter(BSC_THENA_ROUTER);
 
         /* Setup accounts */
         fixture_setupAccountsAndFees(100, 2000);
@@ -70,11 +68,11 @@ contract OptionsTokenTest is Common {
         keepers[0] = keeper;
 
         /* Variables */
-        IThenaRamRouter router = IThenaRamRouter(payable(BSC_VELO_ROUTER));
+        IThenaRamRouter router = IThenaRamRouter(payable(BSC_THENA_ROUTER));
 
         SwapProps[] memory swapProps = new SwapProps[](2);
-        swapProps[0] = SwapProps(BSC_VELO_ROUTER, ExchangeType.VeloSolid);
-        swapProps[1] = SwapProps(BSC_VELO_ROUTER, ExchangeType.VeloSolid);
+        swapProps[0] = SwapProps(BSC_THENA_ROUTER, ExchangeType.ThenaRam);
+        swapProps[1] = SwapProps(BSC_THENA_ROUTER, ExchangeType.ThenaRam);
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -157,7 +155,7 @@ contract OptionsTokenTest is Common {
             address(wantToken),
             address(optionsTokenProxy),
             address(lendingPool),
-            slippages, // 3%
+            slippages,
             swapProps,
             oracles
         );
@@ -181,7 +179,7 @@ contract OptionsTokenTest is Common {
             address(underlyingToken),
             AMOUNT,
             minAmountOutData,
-            veloRouter,
+            address(thenaRamRouter),
             type(uint256).max
         );
         console2.log(

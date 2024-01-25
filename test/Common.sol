@@ -44,18 +44,17 @@ address constant BSC_BUSD = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
 address constant BSC_RUSDC = 0x3bDCEf9e656fD9D03eA98605946b4fbF362C342b;
 address constant BSC_THENA = 0xF4C8E32EaDEC4BFe97E0F595AdD0f4450a863a11;
 address constant BSC_WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
-address constant BSC_VELO_ROUTER = 0xd4ae6eCA985340Dd434D38F470aCCce4DC78D109;
-address constant BSC_VELO_FACTORY = 0x2c788FE40A417612cb654b14a944cd549B5BF130;
+address constant BSC_THENA_ROUTER = 0xd4ae6eCA985340Dd434D38F470aCCce4DC78D109;
+address constant BSC_THENA_FACTORY = 0x2c788FE40A417612cb654b14a944cd549B5BF130;
 
 contract Common is Test {
     IERC20 nativeToken;
     IERC20 paymentToken;
     IERC20 underlyingToken;
     IERC20 wantToken;
+    IThenaRamRouter thenaRamRouter;
 
     ReaperSwapper reaperSwapper;
-    address veloRouter = BSC_VELO_ROUTER;
-    address veloFactory = BSC_VELO_FACTORY;
     bytes32 paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
     bytes32 paymentWantBpt = OP_BTC_WETH_USDC_BPT;
     address balancerVault = OP_BEETX_VAULT;
@@ -124,7 +123,7 @@ contract Common is Test {
                 balancerVault,
                 paymentWantBpt
             );
-        } else if (_exchangeType == ExchangeType.VeloSolid) {
+        } else if (_exchangeType == ExchangeType.ThenaRam) {
             /* configure velo like dexes */
             IThenaRamRouter.route[] memory path = new IThenaRamRouter.route[](
                 1
@@ -137,7 +136,7 @@ contract Common is Test {
             reaperSwapper.updateThenaRamSwapPath(
                 address(paymentToken),
                 address(underlyingToken),
-                veloRouter,
+                address(thenaRamRouter),
                 path
             );
             path[0] = IThenaRamRouter.route(
@@ -148,7 +147,7 @@ contract Common is Test {
             reaperSwapper.updateThenaRamSwapPath(
                 address(underlyingToken),
                 address(paymentToken),
-                veloRouter,
+                address(thenaRamRouter),
                 path
             );
             path[0] = IThenaRamRouter.route(
@@ -159,7 +158,7 @@ contract Common is Test {
             reaperSwapper.updateThenaRamSwapPath(
                 address(paymentToken),
                 address(wantToken),
-                veloRouter,
+                address(thenaRamRouter),
                 path
             );
         }

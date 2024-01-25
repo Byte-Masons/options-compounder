@@ -3,7 +3,7 @@
 pragma solidity ^0.8.0;
 
 /* Imports */
-import {IFlashLoanReceiver} from "aave-v2/flashloan//interfaces/IFlashLoanReceiver.sol";
+import {IFlashLoanReceiver} from "aave-v2/interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
@@ -19,8 +19,9 @@ import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 enum ExchangeType {
     UniV2,
     Bal,
+    UniV3,
     VeloSolid,
-    UniV3
+    ThenaRam
 }
 
 struct SwapProps {
@@ -441,7 +442,15 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 minAmountOutData,
                 exchangeAddress
             );
-        } else if (exType == ExchangeType.VeloSolid) {
+            // } else if (exType == ExchangeType.VeloSolid) {
+            //     swapper.swapVelo(
+            //         tokenIn,
+            //         tokenOut,
+            //         amount,
+            //         minAmountOutData,
+            //         exchangeAddress
+            //     );
+        } else if (exType == ExchangeType.ThenaRam) {
             swapper.swapThenaRam(
                 tokenIn,
                 tokenOut,
