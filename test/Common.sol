@@ -4,8 +4,8 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
-// import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter, RouterV2} from "./mocks/ReaperSwapper.sol";
+import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IThenaRamRouter} from "vault-v2/ReaperSwapper.sol";
+//import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter, RouterV2} from "./mocks/ReaperSwapper.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 
@@ -126,35 +126,37 @@ contract Common is Test {
             );
         } else if (_exchangeType == ExchangeType.VeloSolid) {
             /* configure velo like dexes */
-            RouterV2.route[] memory path = new RouterV2.route[](1);
-            path[0] = RouterV2.route(
+            IThenaRamRouter.route[] memory path = new IThenaRamRouter.route[](
+                1
+            );
+            path[0] = IThenaRamRouter.route(
                 address(paymentToken),
                 address(underlyingToken),
                 false
             );
-            reaperSwapper.updateVeloSwapPath(
+            reaperSwapper.updateThenaRamSwapPath(
                 address(paymentToken),
                 address(underlyingToken),
                 veloRouter,
                 path
             );
-            path[0] = RouterV2.route(
+            path[0] = IThenaRamRouter.route(
                 address(underlyingToken),
                 address(paymentToken),
                 false
             );
-            reaperSwapper.updateVeloSwapPath(
+            reaperSwapper.updateThenaRamSwapPath(
                 address(underlyingToken),
                 address(paymentToken),
                 veloRouter,
                 path
             );
-            path[0] = RouterV2.route(
+            path[0] = IThenaRamRouter.route(
                 address(paymentToken),
                 address(wantToken),
                 false
             );
-            reaperSwapper.updateVeloSwapPath(
+            reaperSwapper.updateThenaRamSwapPath(
                 address(paymentToken),
                 address(wantToken),
                 veloRouter,

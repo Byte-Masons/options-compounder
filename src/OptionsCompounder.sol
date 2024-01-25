@@ -442,7 +442,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 exchangeAddress
             );
         } else if (exType == ExchangeType.VeloSolid) {
-            swapper.swapVelo(
+            swapper.swapThenaRam(
                 tokenIn,
                 tokenOut,
                 amount,

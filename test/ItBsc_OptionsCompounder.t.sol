@@ -17,7 +17,7 @@ import {IRToken} from "./strategies/interfaces/IRToken.sol";
 import {MockedLendingPool, MockedStrategy} from "./mocks/MockedStrategy.sol";
 import {ThenaOracle, IThenaPair} from "optionsToken/src/oracles/ThenaOracle.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
-import {RouterV2} from "./strategies/interfaces/RouterV2.sol";
+import {IThenaRamRouter} from "vault-v2/interfaces/IThenaRamRouter.sol";
 
 contract OptionsTokenTest is Common {
     using FixedPointMathLib for uint256;
@@ -70,7 +70,7 @@ contract OptionsTokenTest is Common {
         keepers[0] = keeper;
 
         /* Variables */
-        RouterV2 router = RouterV2(payable(BSC_VELO_ROUTER));
+        IThenaRamRouter router = IThenaRamRouter(payable(BSC_VELO_ROUTER));
 
         SwapProps[] memory swapProps = new SwapProps[](2);
         swapProps[0] = SwapProps(BSC_VELO_ROUTER, ExchangeType.VeloSolid);
@@ -176,7 +176,7 @@ contract OptionsTokenTest is Common {
             "1. Balance of underlying: ",
             underlyingToken.balanceOf(address(this))
         );
-        reaperSwapper.swapVelo(
+        reaperSwapper.swapThenaRam(
             address(paymentToken),
             address(underlyingToken),
             AMOUNT,
