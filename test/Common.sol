@@ -5,9 +5,11 @@ pragma solidity ^0.8.0;
 import "forge-std/Test.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IThenaRamRouter} from "vault-v2/ReaperSwapper.sol";
-//import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IVeloRouter, RouterV2} from "./mocks/ReaperSwapper.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
+import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
+import {ERC20} from "solmate/tokens/ERC20.sol";
+import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
 
 /* Constants */
 uint256 constant FORK_BLOCK_OP = 114768697;
@@ -47,6 +49,12 @@ address constant BSC_WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
 address constant BSC_THENA_ROUTER = 0xd4ae6eCA985340Dd434D38F470aCCce4DC78D109;
 address constant BSC_THENA_FACTORY = 0x2c788FE40A417612cb654b14a944cd549B5BF130;
 
+/* ARB */
+address constant ARB_USDCE = 0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8;
+address constant ARB_RAM = 0xAAA6C1E32C55A7Bfa8066A6FAE9b42650F262418;
+address constant ARB_WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
+address constant ARB_RAM_ROUTER = 0xAAA87963EFeB6f7E0a2711F397663105Acb1805e;
+
 contract Common is Test {
     IERC20 nativeToken;
     IERC20 paymentToken;
@@ -69,6 +77,11 @@ contract Common is Test {
     address management2;
     address management3;
     address keeper;
+
+    OptionsToken optionsToken;
+    ERC1967Proxy tmpProxy;
+    OptionsToken optionsTokenProxy;
+    DiscountExercise exerciser;
 
     function fixture_setupAccountsAndFees(uint256 fee1, uint256 fee2) public {
         /* Setup accounts */
