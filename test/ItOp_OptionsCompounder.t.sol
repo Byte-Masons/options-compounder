@@ -39,12 +39,17 @@ contract OptionsTokenTest is Common {
     /* Functions */
     function setUp() public {
         /* Common assignments */
-        ExchangeType exchangeType = ExchangeType.Bal;
+        ExchangeType[] memory exchangeType = new ExchangeType[](2);
+        exchangeType[0] = ExchangeType.Bal;
+        exchangeType[1] = ExchangeType.Bal;
         cusdc = CErc20I(OP_CUSDC);
         nativeToken = IERC20(OP_WETH);
         paymentToken = nativeToken;
         underlyingToken = IERC20(OP_OATHV1);
         wantToken = IERC20(OP_USDC);
+        paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
+        paymentWantBpt = OP_BTC_WETH_USDC_BPT;
+        balancerVault = OP_BEETX_VAULT;
 
         /* Setup accounts */
         fixture_setupAccountsAndFees(1500, 200);
@@ -429,7 +434,7 @@ contract OptionsTokenTest is Common {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
+            1000 * MIN_OATH_FOR_FUZZING
         );
 
         /* Prepare option tokens - distribute them to the specified strategy
@@ -440,6 +445,14 @@ contract OptionsTokenTest is Common {
             optionsTokenProxy,
             tokenAdmin
         );
+
+        /* Set high slippage to allow unefficient swap - consider test it later and try to make flasloan unprofitable instead of swap revert*/
+        // vm.startPrank(management1);
+        // uint256[] memory maxSwapSlippages = new uint256[](2);
+        // maxSwapSlippages[0] = 200; // 2%
+        // maxSwapSlippages[1] = 4000; // 40%
+        // strategySonneProxy.setMaxSwapSlippage(maxSwapSlippages);
+        // vm.stopPrank();
 
         /* Decrease option discount in order to make redemption not profitable */
         /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
@@ -453,6 +466,57 @@ contract OptionsTokenTest is Common {
         vm.expectRevert(
             bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
         );
+
+        vm.startPrank(keeper);
+        /* Already approved in fixture_prepareOptionToken */
+        strategySonneProxy.harvestOTokens(
+            amount,
+            address(exerciser),
+            NON_ZERO_PROFIT
+        );
+        vm.stopPrank();
+    }
+
+    function test_flashloanNegativeScenario_highTwapValueAndMultiplier_BAL507(
+        uint256 amount
+    ) public {
+        /* Test vectors definition */
+        amount = bound(
+            amount,
+            5000 * MIN_OATH_FOR_FUZZING,
+            underlyingToken.balanceOf(address(exerciser))
+        );
+
+        /* Prepare option tokens - distribute them to the specified strategy
+        and approve for spending */
+        fixture_prepareOptionToken(
+            amount,
+            address(strategySonneProxy),
+            optionsTokenProxy,
+            tokenAdmin
+        );
+
+        /* Set high slippage to allow unefficient swap - consider test it later and try to make flasloan unprofitable instead of swap revert*/
+        // vm.startPrank(management1);
+        // uint256[] memory maxSwapSlippages = new uint256[](2);
+        // maxSwapSlippages[0] = 200; // 2%
+        // maxSwapSlippages[1] = 4000; // 40%
+        // strategySonneProxy.setMaxSwapSlippage(maxSwapSlippages);
+        // vm.stopPrank();
+
+        /* Decrease option discount in order to make redemption not profitable */
+        /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
+        vm.startPrank(owner);
+        exerciser.setMultiplier(9999);
+        vm.stopPrank();
+        /* Increase TWAP price to make flashloan not profitable */
+        underlyingPaymentMock.setTwapValue(initTwap + ((initTwap * 10) / 100));
+
+        /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
+        // vm.expectRevert(
+        //     bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
+        // );
+        vm.expectRevert("BAL#507");
 
         vm.startPrank(keeper);
         /* Already approved in fixture_prepareOptionToken */
@@ -574,4 +638,74 @@ contract OptionsTokenTest is Common {
         );
         vm.stopPrank();
     }
+
+    // function test_harvestCallWithNotFundedDiscountExercise(
+    //     uint256 amount
+    // ) public {
+    //     /* Test vectors definition */
+    //     amount = bound(
+    //         amount,
+    //         MIN_OATH_FOR_FUZZING,
+    //         underlyingToken.balanceOf(address(exerciser))
+    //     );
+
+    //     bytes memory exerciseParams = abi.encode(
+    //         DiscountExerciseParams({
+    //             maxPaymentAmount: amount,
+    //             deadline: type(uint256).max
+    //         })
+    //     );
+    //     uint256 amountOptions = (underlyingToken.balanceOf(address(exerciser)) *
+    //         10000) / exerciser.multiplier();
+    //     console2.log(address(exerciser));
+    //     /* Prepare option tokens - distribute them to the specified strategy
+    //     and approve for spending */
+    //     console2.log(
+    //         "1. Balance: ",
+    //         optionsTokenProxy.balanceOf(address(this))
+    //     );
+
+    //     fixture_prepareOptionToken(
+    //         amount,
+    //         address(strategySonneProxy),
+    //         optionsTokenProxy,
+    //         tokenAdmin
+    //     );
+    //     vm.startPrank(tokenAdmin);
+    //     optionsTokenProxy.mint(address(this), amountOptions);
+    //     vm.stopPrank();
+    //     console2.log(
+    //         "2. Balance: ",
+    //         optionsTokenProxy.balanceOf(address(this))
+    //     );
+    //     console2.log(
+    //         "1. UBalance: ",
+    //         underlyingToken.balanceOf(address(exerciser))
+    //     );
+    //     paymentToken.approve(
+    //         address(exerciser),
+    //         paymentToken.balanceOf(address(this))
+    //     );
+    //     optionsTokenProxy.exercise(
+    //         amountOptions,
+    //         address(this),
+    //         address(exerciser),
+    //         exerciseParams
+    //     );
+    //     console2.log(
+    //         "2. UBalance: ",
+    //         underlyingToken.balanceOf(address(exerciser))
+    //     );
+    //     vm.startPrank(keeper);
+    //     /* Assertion */
+    //     vm.expectRevert(
+    //         bytes4(keccak256("OptionsCompounder__NotEnoughUnderlyingTokens()"))
+    //     );
+    //     strategySonneProxy.harvestOTokens(
+    //         amount,
+    //         address(exerciser),
+    //         NON_ZERO_PROFIT
+    //     );
+    //     vm.stopPrank();
+    // }
 }

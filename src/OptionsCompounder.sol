@@ -11,7 +11,6 @@ import {IOptionsToken} from "optionsToken/src/interfaces/IOptionsToken.sol";
 import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
-import {ERC20} from "oz/token/ERC20/ERC20.sol";
 import {Initializable} from "oz-upgradeable/proxy/utils/Initializable.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
@@ -56,6 +55,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     error OptionsCompounder__InvalidExchangeType(uint256 exchangeType);
     error OptionsCompounder__WrongNumberOfParams();
     error OptionsCompounder__SlippageGreaterThanMax();
+    error OptionsCompounder__NotEnoughUnderlyingTokens();
+    error OptionsCompounder__WrongMinWantAmount();
 
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
@@ -177,6 +178,10 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         oracles = _oracles;
     }
 
+    function setAddressProvider(address _addressProvider) external onlyAdmins {
+        addressProvider = ILendingPoolAddressesProvider(_addressProvider);
+    }
+
     /**
      * @notice Function initiates flashloan to get assets for exercising options.
      * @dev Can be executed only by keeper role. Reentrance protected.
@@ -197,6 +202,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         if (flashloanFinished == false) {
             revert OptionsCompounder__FlashloanNotFinished();
         }
+        if (minWantAmount == 0) {
+            revert OptionsCompounder__WrongMinWantAmount();
+        }
         /* Locals */
         IERC20 paymentToken = DiscountExercise(exerciseContract).paymentToken();
         uint256 initialBalance = paymentToken.balanceOf(address(this));
@@ -210,7 +218,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         );
 
         // 0 = no debt, 1 = stable, 2 = variable
-        uint256[] memory modes = new uint256[](2);
+        uint256[] memory modes = new uint256[](1);
         modes[0] = 0;
 
         /* necesary params used during flashloan execution */
@@ -313,6 +321,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 deadline: type(uint256).max
             })
         );
+        if (underlyingToken.balanceOf(exerciserContract) < optionsAmount) {
+            revert OptionsCompounder__NotEnoughUnderlyingTokens();
+        }
         /* Approve spending option token */
         paymentToken.approve(exerciserContract, amount);
         /* Exercise in order to get underlying token */
@@ -350,13 +361,13 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
         /* Protected against underflows by statement above */
-        gainInPaymentToken = (assetBalance - initialBalance) - totalAmountToPay;
-
-        /* Approve the underlying token to make swap */
-        IERC20(asset).approve(swapperSwaps(), gainInPaymentToken);
+        gainInPaymentToken = assetBalance - totalAmountToPay;
 
         /* Get strategies want token */
         if (wantToken() != asset) {
+            /* Approve the underlying token to make swap */
+            IERC20(asset).approve(swapperSwaps(), gainInPaymentToken);
+            /* Get minimal amount of data */
             minAmountOutData[
                 uint256(SwapIdx.PAYMENT_TO_WANT)
             ] = _getMinAmountOutData(
@@ -442,14 +453,6 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 minAmountOutData,
                 exchangeAddress
             );
-            // } else if (exType == ExchangeType.VeloSolid) {
-            //     swapper.swapVelo(
-            //         tokenIn,
-            //         tokenOut,
-            //         amount,
-            //         minAmountOutData,
-            //         exchangeAddress
-            //     );
         } else if (exType == ExchangeType.ThenaRam) {
             swapper.swapThenaRam(
                 tokenIn,

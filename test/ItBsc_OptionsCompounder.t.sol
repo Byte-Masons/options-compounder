@@ -11,8 +11,6 @@ import {Helper} from "./mocks/HelperFunctions.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {IAToken} from "./strategies/interfaces/IAToken.sol";
 import {MockedLendingPool, MockedStrategy} from "./mocks/MockedStrategy.sol";
-import {ThenaOracle, IThenaPair} from "optionsToken/src/oracles/ThenaOracle.sol";
-import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 import {IThenaRamRouter} from "vault-v2/interfaces/IThenaRamRouter.sol";
 
 contract OptionsTokenTest is Common {
@@ -23,7 +21,7 @@ contract OptionsTokenTest is Common {
     string MAINNET_URL = vm.envString("BSC_RPC_URL_MAINNET");
 
     /* Contract variables */
-    ThenaOracle underlyingPaymentOracle;
+
     ThenaOracle paymentWantOracle;
     MockBalancerTwapOracle balancerTwapOracle;
     MockedLendingPool lendingPool;
@@ -33,12 +31,15 @@ contract OptionsTokenTest is Common {
 
     function setUp() public {
         /* Common assignments */
-        ExchangeType exchangeType = ExchangeType.ThenaRam;
+        ExchangeType[] memory exchangeType = new ExchangeType[](2);
+        exchangeType[0] = ExchangeType.ThenaRam;
+        exchangeType[1] = ExchangeType.UniV3;
         nativeToken = IERC20(BSC_WBNB);
         paymentToken = nativeToken;
         underlyingToken = IERC20(BSC_THENA);
         wantToken = IERC20(BSC_BUSD);
         thenaRamRouter = IThenaRamRouter(BSC_THENA_ROUTER);
+        routerV2 = ISwapRouter(BSC_PANCAKE_ROUTERV3);
 
         /* Setup accounts */
         fixture_setupAccountsAndFees(100, 2000);
@@ -60,11 +61,8 @@ contract OptionsTokenTest is Common {
         keepers[0] = keeper;
 
         /* Variables */
-        IThenaRamRouter router = IThenaRamRouter(payable(BSC_THENA_ROUTER));
 
-        SwapProps[] memory swapProps = new SwapProps[](2);
-        swapProps[0] = SwapProps(BSC_THENA_ROUTER, ExchangeType.ThenaRam);
-        swapProps[1] = SwapProps(BSC_THENA_ROUTER, ExchangeType.ThenaRam);
+        SwapProps[] memory swapProps = fixture_getSwapProps(exchangeType);
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -79,38 +77,11 @@ contract OptionsTokenTest is Common {
         fixture_configureSwapper(exchangeType);
 
         /* Oracle mocks deployment */
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(underlyingToken);
-        tokens[1] = address(paymentToken);
+        // address[] memory tokens = new address[](2);
+        // tokens[0] = address(underlyingToken);
+        // tokens[1] = address(paymentToken);
         //balancerTwapOracle = new MockBalancerTwapOracle(tokens);
-        address pair = router.pairFor(
-            address(underlyingToken),
-            address(paymentToken),
-            false
-        );
-        console2.log("1. Pair: ", pair);
-        underlyingPaymentOracle = new ThenaOracle(
-            IThenaPair(pair),
-            address(underlyingToken),
-            owner,
-            ORACLE_SECS,
-            ORACLE_MIN_PRICE
-        );
-        console2.log("1. Price: ", underlyingPaymentOracle.getPrice());
-        console2.log("Want address: ", address(wantToken));
-        pair = router.pairFor(address(paymentToken), address(wantToken), false);
-        console2.log("2. Pair: ", pair);
-        paymentWantOracle = new ThenaOracle(
-            IThenaPair(pair),
-            address(paymentToken),
-            owner,
-            ORACLE_SECS,
-            ORACLE_MIN_PRICE
-        );
-        console2.log("2. Price: ", paymentWantOracle.getPrice());
-        IOracle[] memory oracles = new IOracle[](2);
-        oracles[0] = IOracle(address(underlyingPaymentOracle));
-        oracles[1] = IOracle(address(paymentWantOracle));
+        IOracle[] memory oracles = fixture_getOracles(exchangeType);
 
         /* Option token deployment */
         vm.startPrank(owner);
@@ -128,7 +99,7 @@ contract OptionsTokenTest is Common {
             owner,
             paymentToken,
             underlyingToken,
-            underlyingPaymentOracle,
+            oracles[0],
             PRICE_MULTIPLIER,
             treasuries,
             feeBPS
@@ -162,21 +133,14 @@ contract OptionsTokenTest is Common {
             0
         );
         paymentToken.approve(address(reaperSwapper), AMOUNT);
-        console2.log(
-            "1. Balance of underlying: ",
-            underlyingToken.balanceOf(address(this))
-        );
         reaperSwapper.swapThenaRam(
             address(paymentToken),
             address(underlyingToken),
             AMOUNT,
             minAmountOutData,
             address(thenaRamRouter),
-            type(uint256).max
-        );
-        console2.log(
-            "2. Balance of underlying: ",
-            underlyingToken.balanceOf(address(this))
+            type(uint256).max,
+            true
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
@@ -201,7 +165,6 @@ contract OptionsTokenTest is Common {
 
         /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
-        console2.log("Strategy address: ", address(strategy));
         fixture_prepareOptionToken(
             amount,
             address(strategy),
