@@ -31,15 +31,16 @@ contract OptionsTokenTest is Common {
 
     function setUp() public {
         /* Common assignments */
-        ExchangeType[] memory exchangeType = new ExchangeType[](2);
-        exchangeType[0] = ExchangeType.ThenaRam;
-        exchangeType[1] = ExchangeType.UniV3;
+        ExchangeType[] memory exchangeTypes = new ExchangeType[](2);
+        exchangeTypes[0] = ExchangeType.ThenaRam;
+        exchangeTypes[1] = ExchangeType.ThenaRam;
         nativeToken = IERC20(BSC_WBNB);
         paymentToken = nativeToken;
         underlyingToken = IERC20(BSC_THENA);
         wantToken = IERC20(BSC_BUSD);
         thenaRamRouter = IThenaRamRouter(BSC_THENA_ROUTER);
-        routerV2 = ISwapRouter(BSC_PANCAKE_ROUTERV3);
+        routerV2 = ISwapRouter(BSC_UNIV3_ROUTERV2);
+        univ3Factory = IUniswapV3Factory(BSC_UNIV3_FACTORY);
 
         /* Setup accounts */
         fixture_setupAccountsAndFees(100, 2000);
@@ -62,7 +63,7 @@ contract OptionsTokenTest is Common {
 
         /* Variables */
 
-        SwapProps[] memory swapProps = fixture_getSwapProps(exchangeType);
+        SwapProps[] memory swapProps = fixture_getSwapProps(exchangeTypes);
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -74,14 +75,14 @@ contract OptionsTokenTest is Common {
         reaperSwapper.initialize(strategists, address(this), address(this));
 
         /* Configure swapper */
-        fixture_configureSwapper(exchangeType);
+        fixture_configureSwapper(exchangeTypes);
 
         /* Oracle mocks deployment */
         // address[] memory tokens = new address[](2);
         // tokens[0] = address(underlyingToken);
         // tokens[1] = address(paymentToken);
         //balancerTwapOracle = new MockBalancerTwapOracle(tokens);
-        IOracle[] memory oracles = fixture_getOracles(exchangeType);
+        IOracle[] memory oracles = fixture_getOracles(exchangeTypes);
 
         /* Option token deployment */
         vm.startPrank(owner);

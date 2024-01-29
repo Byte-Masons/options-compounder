@@ -39,9 +39,9 @@ contract OptionsTokenTest is Common {
     /* Functions */
     function setUp() public {
         /* Common assignments */
-        ExchangeType[] memory exchangeType = new ExchangeType[](2);
-        exchangeType[0] = ExchangeType.Bal;
-        exchangeType[1] = ExchangeType.Bal;
+        ExchangeType[] memory exchangeTypes = new ExchangeType[](2);
+        exchangeTypes[0] = ExchangeType.Bal;
+        exchangeTypes[1] = ExchangeType.Bal;
         cusdc = CErc20I(OP_CUSDC);
         nativeToken = IERC20(OP_WETH);
         paymentToken = nativeToken;
@@ -86,7 +86,7 @@ contract OptionsTokenTest is Common {
         reaperSwapper.initialize(strategists, address(this), address(this));
 
         /* Configure swapper */
-        fixture_configureSwapper(exchangeType);
+        fixture_configureSwapper(exchangeTypes);
 
         /* Oracle mocks deployment */
         address[] memory tokens = new address[](2);

@@ -25,7 +25,7 @@ enum ExchangeType {
 
 struct SwapProps {
     address exchangeAddress;
-    ExchangeType exchangeType;
+    ExchangeType exchangeTypes;
 }
 
 /**
@@ -52,7 +52,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     error OptionsCompounder__OnlyKeeperAllowed();
     error OptionsCompounder__OnlyAdminsAllowed();
     error OptionsCompounder__FlashloanNotTriggered();
-    error OptionsCompounder__InvalidExchangeType(uint256 exchangeType);
+    error OptionsCompounder__InvalidExchangeType(uint256 exchangeTypes);
     error OptionsCompounder__WrongNumberOfParams();
     error OptionsCompounder__SlippageGreaterThanMax();
     error OptionsCompounder__NotEnoughUnderlyingTokens();
@@ -347,7 +347,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
         /* Swap underlying token to payment token (asset) */
         _generalSwap(
-            swapProps[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)].exchangeType,
+            swapProps[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)].exchangeTypes,
             address(underlyingToken),
             asset,
             balanceOfUnderlyingToken,
@@ -376,7 +376,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 SwapIdx.PAYMENT_TO_WANT
             );
             _generalSwap(
-                swapProps[uint256(SwapIdx.PAYMENT_TO_WANT)].exchangeType,
+                swapProps[uint256(SwapIdx.PAYMENT_TO_WANT)].exchangeTypes,
                 asset,
                 wantToken(),
                 gainInPaymentToken,
