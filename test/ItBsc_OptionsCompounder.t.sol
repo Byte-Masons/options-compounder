@@ -43,7 +43,7 @@ contract OptionsTokenTest is Common {
         univ3Factory = IUniswapV3Factory(BSC_UNIV3_FACTORY);
 
         /* Setup accounts */
-        fixture_setupAccountsAndFees(100, 2000);
+        fixture_setupAccountsAndFees(3000, 7000);
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 

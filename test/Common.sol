@@ -6,7 +6,8 @@ import "forge-std/Test.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IThenaRamRouter, ISwapRouter, UniV3SwapData} from "vault-v2/ReaperSwapper.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
-import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
+import {SwapProps} from "../src/OptionsCompounder.sol";
+import {ExchangeType} from "vault-v2/ReaperBaseStrategyv4.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
@@ -14,6 +15,8 @@ import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 import {ThenaOracle, IThenaPair} from "optionsToken/src/oracles/ThenaOracle.sol";
 import {IUniswapV3Factory} from "vault-v2/interfaces/IUniswapV3Factory.sol";
 import {IUniswapV3Pool, UniswapV3Oracle} from "optionsToken/src/oracles/UniswapV3Oracle.sol";
+import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
+import {BalancerOracle} from "optionsToken/src/oracles/BalancerOracle.sol";
 
 error Common__NotYetImplemented();
 
@@ -39,12 +42,18 @@ address constant OP_OATHV1 = 0x39FdE572a18448F8139b7788099F0a0740f51205;
 address constant OP_OATHV2 = 0x00e1724885473B63bCE08a9f0a52F35b0979e35A;
 address constant OP_CUSDC = 0xEC8FEa79026FfEd168cCf5C627c7f486D77b765F;
 address constant OP_GUSDC = 0x7A0FDDBA78FF45D353B1630B77f4D175A00df0c0;
+address constant OP_GOP = 0x30091e843deb234EBb45c7E1Da4bBC4C33B3f0B4;
+address constant OP_SOOP = 0x8cD6b19A07d754bF36AdEEE79EDF4F2134a8F571;
 address constant OP_USDC = 0x7F5c764cBc14f9669B88837ca1490cCa17c31607;
+address constant OP_OP = 0x4200000000000000000000000000000000000042;
 address constant OP_DATA_PROVIDER = 0x9546F673eF71Ff666ae66d01Fd6E7C6Dae5a9995;
 bytes32 constant OP_OATHV1_ETH_BPT = 0xd20f6f1d8a675cdca155cb07b5dc9042c467153f0002000000000000000000bc; // OATHv1/ETH BPT
 bytes32 constant OP_OATHV2_ETH_BPT = 0xd13d81af624956327a24d0275cbe54b0ee0e9070000200000000000000000109; // OATHv2/ETH BPT
 bytes32 constant OP_BTC_WETH_USDC_BPT = 0x5028497af0c9a54ea8c6d42a054c0341b9fc6168000100000000000000000004;
+bytes32 constant OP_WETH_OP_USDC_BPT = 0x39965c9dab5448482cf7e002f583c812ceb53046000100000000000000000003;
 address constant OP_BEETX_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
+address constant OP_UNIV3_ROUTERV2 = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
+address constant OP_UNIV3_FACTORY = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
 
 /* BSC */
 address constant BSC_BUSD = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
@@ -231,6 +240,21 @@ contract Common is Test {
 
         for (uint8 idx = 0; idx < exchangeTypes.length; idx++) {
             if (exchangeTypes[idx] == ExchangeType.Bal) {
+                // MockBalancerTwapOracle underlyingPaymentMock;
+                // BalancerOracle underlyingPaymentOracle;
+                // address[] memory _tokens = new address[](2);
+                // _tokens[0] = address(paymentToken);
+                // _tokens[1] = address(underlyingToken);
+                // underlyingPaymentMock = new MockBalancerTwapOracle(_tokens);
+                // underlyingPaymentOracle = new BalancerOracle(
+                //     underlyingPaymentMock,
+                //     address(underlyingToken),
+                //     owner,
+                //     ORACLE_SECS,
+                //     ORACLE_AGO,
+                //     ORACLE_MIN_PRICE
+                // );
+                // oracles[idx] = underlyingPaymentOracle;
                 revert Common__NotYetImplemented();
             } else if (exchangeTypes[idx] == ExchangeType.ThenaRam) {
                 IThenaRamRouter router = IThenaRamRouter(

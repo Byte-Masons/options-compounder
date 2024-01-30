@@ -6,11 +6,9 @@ import "./Common.sol";
 
 import {ReaperStrategySonne} from "./strategies/ReaperStrategySonne.sol";
 import {ReaperStrategyGranary} from "./strategies/ReaperStrategyGranary.sol";
-import {BalancerOracle} from "optionsToken/src/oracles/BalancerOracle.sol";
 import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
-import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
@@ -25,10 +23,10 @@ contract OptionsTokenTest is Common {
     string MAINNET_URL = vm.envString("OP_RPC_URL_MAINNET");
 
     /* Contract variables */
-    CErc20I cusdc;
+    CErc20I sousdc;
     MockBalancerTwapOracle underlyingPaymentMock;
     BalancerOracle underlyingPaymentOracle;
-    BalancerOracle paymentWantOracle;
+    UniswapV3Oracle paymentWantOracle;
     ReaperStrategySonne strategySonne;
     ReaperStrategySonne strategySonneProxy;
     ReaperStrategyGranary strategyGranary;
@@ -42,17 +40,19 @@ contract OptionsTokenTest is Common {
         ExchangeType[] memory exchangeTypes = new ExchangeType[](2);
         exchangeTypes[0] = ExchangeType.Bal;
         exchangeTypes[1] = ExchangeType.Bal;
-        cusdc = CErc20I(OP_CUSDC);
+        sousdc = CErc20I(OP_SOOP);
         nativeToken = IERC20(OP_WETH);
         paymentToken = nativeToken;
         underlyingToken = IERC20(OP_OATHV1);
-        wantToken = IERC20(OP_USDC);
+        wantToken = IERC20(OP_OP);
         paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
-        paymentWantBpt = OP_BTC_WETH_USDC_BPT;
+        paymentWantBpt = OP_WETH_OP_USDC_BPT;
         balancerVault = OP_BEETX_VAULT;
+        routerV2 = ISwapRouter(OP_UNIV3_ROUTERV2);
+        univ3Factory = IUniswapV3Factory(OP_UNIV3_FACTORY);
 
         /* Setup accounts */
-        fixture_setupAccountsAndFees(1500, 200);
+        fixture_setupAccountsAndFees(2500, 7500);
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
@@ -90,8 +90,8 @@ contract OptionsTokenTest is Common {
 
         /* Oracle mocks deployment */
         address[] memory tokens = new address[](2);
-        tokens[0] = address(underlyingToken);
-        tokens[1] = address(paymentToken);
+        tokens[0] = address(paymentToken);
+        tokens[1] = address(underlyingToken);
         underlyingPaymentMock = new MockBalancerTwapOracle(tokens);
         underlyingPaymentOracle = new BalancerOracle(
             underlyingPaymentMock,
@@ -107,12 +107,15 @@ contract OptionsTokenTest is Common {
         MockBalancerTwapOracle paymentWantMock = new MockBalancerTwapOracle(
             tokens
         );
-        paymentWantOracle = new BalancerOracle(
-            paymentWantMock,
-            address(paymentToken),
+        IUniswapV3Pool univ3Pool = IUniswapV3Pool(
+            univ3Factory.getPool(tokens[0], tokens[1], 500)
+        );
+        paymentWantOracle = new UniswapV3Oracle(
+            univ3Pool,
+            tokens[0],
             owner,
-            ORACLE_SECS,
-            ORACLE_AGO,
+            uint32(ORACLE_SECS),
+            uint32(ORACLE_AGO),
             ORACLE_MIN_PRICE
         );
 
@@ -159,7 +162,7 @@ contract OptionsTokenTest is Common {
             strategists,
             multisigRoles,
             keepers,
-            address(cusdc),
+            address(sousdc),
             address(optionsTokenProxy),
             OP_POOL_ADDRESSES_PROVIDER_V2,
             targetLTV,
@@ -178,7 +181,7 @@ contract OptionsTokenTest is Common {
             strategists,
             multisigRoles,
             keepers,
-            IAToken(OP_GUSDC),
+            IAToken(OP_GOP),
             targetLTV,
             2 * targetLTV,
             OP_POOL_ADDRESSES_PROVIDER_V2,
@@ -539,7 +542,7 @@ contract OptionsTokenTest is Common {
             underlyingToken.balanceOf(address(exerciser))
         );
         /* Too high expectation of profit - together with high exerciser multiplier makes flashloan not profitable */
-        minAmountOfWant = bound(minAmountOfWant, 1e19, UINT256_MAX);
+        minAmountOfWant = bound(minAmountOfWant, 1e22, UINT256_MAX);
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
