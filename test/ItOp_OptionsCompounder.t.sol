@@ -48,7 +48,7 @@ contract OptionsTokenTest is Common {
         paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
         paymentWantBpt = OP_WETH_OP_USDC_BPT;
         balancerVault = OP_BEETX_VAULT;
-        routerV2 = ISwapRouter(OP_UNIV3_ROUTERV2);
+        routerV2 = ISwapRouter(OP_UNIV3_ROUTERV);
         univ3Factory = IUniswapV3Factory(OP_UNIV3_FACTORY);
 
         /* Setup accounts */
