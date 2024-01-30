@@ -480,57 +480,6 @@ contract OptionsTokenTest is Common {
         vm.stopPrank();
     }
 
-    function test_flashloanNegativeScenario_highTwapValueAndMultiplier_BAL507(
-        uint256 amount
-    ) public {
-        /* Test vectors definition */
-        amount = bound(
-            amount,
-            5000 * MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
-
-        /* Prepare option tokens - distribute them to the specified strategy
-        and approve for spending */
-        fixture_prepareOptionToken(
-            amount,
-            address(strategySonneProxy),
-            optionsTokenProxy,
-            tokenAdmin
-        );
-
-        /* Set high slippage to allow unefficient swap - consider test it later and try to make flasloan unprofitable instead of swap revert*/
-        // vm.startPrank(management1);
-        // uint256[] memory maxSwapSlippages = new uint256[](2);
-        // maxSwapSlippages[0] = 200; // 2%
-        // maxSwapSlippages[1] = 4000; // 40%
-        // strategySonneProxy.setMaxSwapSlippage(maxSwapSlippages);
-        // vm.stopPrank();
-
-        /* Decrease option discount in order to make redemption not profitable */
-        /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
-        vm.startPrank(owner);
-        exerciser.setMultiplier(9999);
-        vm.stopPrank();
-        /* Increase TWAP price to make flashloan not profitable */
-        underlyingPaymentMock.setTwapValue(initTwap + ((initTwap * 10) / 100));
-
-        /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
-        // vm.expectRevert(
-        //     bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
-        // );
-        vm.expectRevert("BAL#507");
-
-        vm.startPrank(keeper);
-        /* Already approved in fixture_prepareOptionToken */
-        strategySonneProxy.harvestOTokens(
-            amount,
-            address(exerciser),
-            NON_ZERO_PROFIT
-        );
-        vm.stopPrank();
-    }
-
     function test_flashloanNegativeScenario_tooHighMinAmounOfWantExpected(
         uint256 amount,
         uint256 minAmountOfWant

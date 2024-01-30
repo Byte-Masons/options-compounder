@@ -141,7 +141,7 @@ contract OptionsTokenTest is Common {
             minAmountOutData,
             address(thenaRamRouter),
             type(uint256).max,
-            true
+            false
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
