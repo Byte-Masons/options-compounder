@@ -6,7 +6,6 @@ import "./Common.sol";
 
 import {ReaperStrategySonne} from "./strategies/ReaperStrategySonne.sol";
 import {ReaperStrategyGranary} from "./strategies/ReaperStrategyGranary.sol";
-import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";

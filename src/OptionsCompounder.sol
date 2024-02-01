@@ -14,7 +14,13 @@ import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {Initializable} from "oz-upgradeable/proxy/utils/Initializable.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
-import {ExchangeType} from "vault-v2/ReaperBaseStrategyv4.sol";
+
+enum ExchangeType {
+    UniV2,
+    Bal,
+    ThenaRam,
+    UniV3
+}
 
 struct SwapProps {
     address exchangeAddress;
