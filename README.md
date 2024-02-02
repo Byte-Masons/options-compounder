@@ -4,35 +4,12 @@ A token with options that grant the holder the ability to acquire the base token
 
 ## Installation
 
-To install with [DappTools](https://github.com/dapphub/dapptools):
-
 ```
-dapp install timeless-fi/options-token
+forge install 
 ```
+## Tests
 
-To install with [Foundry](https://github.com/gakonst/foundry):
-
-```
-forge install timeless-fi/options-token
-```
-
-## Local development
-
-This project uses [Foundry](https://github.com/gakonst/foundry) as the development framework.
-
-### Dependencies
-
-```
-forge install
-```
-
-### Compilation
-
-```
-forge build
-```
-
-### Testing
+.env.example -> .env -> populate rpc providers
 
 ```
 forge test
