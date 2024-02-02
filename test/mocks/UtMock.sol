@@ -40,6 +40,7 @@ contract UtMock {
         mockedPaymentToken.mint(_paymentAmount);
         mockedPaymentToken.transfer(_strategyAddress, _initialPaymentBalance);
         mockedUnderlyingWant.mint(_wantAmount);
+        mockedUnderlyingToken.mint(_oTokensAmount);
         oTokensAmount = _oTokensAmount;
         strategy = ReaperStrategySonne(_strategyAddress);
         premium = _premium;

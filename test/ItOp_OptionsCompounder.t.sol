@@ -6,22 +6,13 @@ import "./Common.sol";
 
 import {ReaperStrategySonne} from "./strategies/ReaperStrategySonne.sol";
 import {ReaperStrategyGranary} from "./strategies/ReaperStrategyGranary.sol";
-import {BalancerOracle} from "optionsToken/src/oracles/BalancerOracle.sol";
-import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {CErc20I} from "./strategies/interfaces/CErc20I.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
-import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
-import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOracle.sol";
 import {Helper} from "./mocks/HelperFunctions.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
-import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {IAToken} from "./strategies/interfaces/IAToken.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
-
-// import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperSwapper.sol";
 
 contract OptionsTokenTest is Common {
     using FixedPointMathLib for uint256;
@@ -31,14 +22,10 @@ contract OptionsTokenTest is Common {
     string MAINNET_URL = vm.envString("OP_RPC_URL_MAINNET");
 
     /* Contract variables */
-    CErc20I cusdc;
-    OptionsToken optionsToken;
-    ERC1967Proxy tmpProxy;
-    OptionsToken optionsTokenProxy;
-    DiscountExercise exerciser;
+    CErc20I sousdc;
     MockBalancerTwapOracle underlyingPaymentMock;
     BalancerOracle underlyingPaymentOracle;
-    BalancerOracle paymentWantOracle;
+    UniswapV3Oracle paymentWantOracle;
     ReaperStrategySonne strategySonne;
     ReaperStrategySonne strategySonneProxy;
     ReaperStrategyGranary strategyGranary;
@@ -49,15 +36,22 @@ contract OptionsTokenTest is Common {
     /* Functions */
     function setUp() public {
         /* Common assignments */
-        ExchangeType exchangeType = ExchangeType.Bal;
-        cusdc = CErc20I(OP_CUSDC);
+        ExchangeType[] memory exchangeTypes = new ExchangeType[](2);
+        exchangeTypes[0] = ExchangeType.Bal;
+        exchangeTypes[1] = ExchangeType.Bal;
+        sousdc = CErc20I(OP_SOOP);
         nativeToken = IERC20(OP_WETH);
         paymentToken = nativeToken;
         underlyingToken = IERC20(OP_OATHV1);
-        wantToken = IERC20(OP_USDC);
+        wantToken = IERC20(OP_OP);
+        paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
+        paymentWantBpt = OP_WETH_OP_USDC_BPT;
+        balancerVault = OP_BEETX_VAULT;
+        routerV2 = ISwapRouter(OP_UNIV3_ROUTERV);
+        univ3Factory = IUniswapV3Factory(OP_UNIV3_FACTORY);
 
         /* Setup accounts */
-        fixture_setupAccountsAndFees(1500, 200);
+        fixture_setupAccountsAndFees(2500, 7500);
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
@@ -91,12 +85,12 @@ contract OptionsTokenTest is Common {
         reaperSwapper.initialize(strategists, address(this), address(this));
 
         /* Configure swapper */
-        fixture_configureSwapper(exchangeType);
+        fixture_configureSwapper(exchangeTypes);
 
         /* Oracle mocks deployment */
         address[] memory tokens = new address[](2);
-        tokens[0] = address(underlyingToken);
-        tokens[1] = address(paymentToken);
+        tokens[0] = address(paymentToken);
+        tokens[1] = address(underlyingToken);
         underlyingPaymentMock = new MockBalancerTwapOracle(tokens);
         underlyingPaymentOracle = new BalancerOracle(
             underlyingPaymentMock,
@@ -112,12 +106,15 @@ contract OptionsTokenTest is Common {
         MockBalancerTwapOracle paymentWantMock = new MockBalancerTwapOracle(
             tokens
         );
-        paymentWantOracle = new BalancerOracle(
-            paymentWantMock,
-            address(paymentToken),
+        IUniswapV3Pool univ3Pool = IUniswapV3Pool(
+            univ3Factory.getPool(tokens[0], tokens[1], 500)
+        );
+        paymentWantOracle = new UniswapV3Oracle(
+            univ3Pool,
+            tokens[0],
             owner,
-            ORACLE_SECS,
-            ORACLE_AGO,
+            uint32(ORACLE_SECS),
+            uint32(ORACLE_AGO),
             ORACLE_MIN_PRICE
         );
 
@@ -164,7 +161,7 @@ contract OptionsTokenTest is Common {
             strategists,
             multisigRoles,
             keepers,
-            address(cusdc),
+            address(sousdc),
             address(optionsTokenProxy),
             OP_POOL_ADDRESSES_PROVIDER_V2,
             targetLTV,
@@ -183,7 +180,7 @@ contract OptionsTokenTest is Common {
             strategists,
             multisigRoles,
             keepers,
-            IAToken(OP_GUSDC),
+            IAToken(OP_GOP),
             targetLTV,
             2 * targetLTV,
             OP_POOL_ADDRESSES_PROVIDER_V2,
@@ -439,7 +436,7 @@ contract OptionsTokenTest is Common {
         amount = bound(
             amount,
             MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
+            1000 * MIN_OATH_FOR_FUZZING
         );
 
         /* Prepare option tokens - distribute them to the specified strategy
@@ -450,6 +447,14 @@ contract OptionsTokenTest is Common {
             optionsTokenProxy,
             tokenAdmin
         );
+
+        /* Set high slippage to allow unefficient swap - consider test it later and try to make flasloan unprofitable instead of swap revert*/
+        // vm.startPrank(management1);
+        // uint256[] memory maxSwapSlippages = new uint256[](2);
+        // maxSwapSlippages[0] = 200; // 2%
+        // maxSwapSlippages[1] = 4000; // 40%
+        // strategySonneProxy.setMaxSwapSlippage(maxSwapSlippages);
+        // vm.stopPrank();
 
         /* Decrease option discount in order to make redemption not profitable */
         /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
@@ -485,7 +490,7 @@ contract OptionsTokenTest is Common {
             underlyingToken.balanceOf(address(exerciser))
         );
         /* Too high expectation of profit - together with high exerciser multiplier makes flashloan not profitable */
-        minAmountOfWant = bound(minAmountOfWant, 1e19, UINT256_MAX);
+        minAmountOfWant = bound(minAmountOfWant, 1e22, UINT256_MAX);
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
@@ -584,4 +589,74 @@ contract OptionsTokenTest is Common {
         );
         vm.stopPrank();
     }
+
+    // function test_harvestCallWithNotFundedDiscountExercise(
+    //     uint256 amount
+    // ) public {
+    //     /* Test vectors definition */
+    //     amount = bound(
+    //         amount,
+    //         MIN_OATH_FOR_FUZZING,
+    //         underlyingToken.balanceOf(address(exerciser))
+    //     );
+
+    //     bytes memory exerciseParams = abi.encode(
+    //         DiscountExerciseParams({
+    //             maxPaymentAmount: amount,
+    //             deadline: type(uint256).max
+    //         })
+    //     );
+    //     uint256 amountOptions = (underlyingToken.balanceOf(address(exerciser)) *
+    //         10000) / exerciser.multiplier();
+    //     console2.log(address(exerciser));
+    //     /* Prepare option tokens - distribute them to the specified strategy
+    //     and approve for spending */
+    //     console2.log(
+    //         "1. Balance: ",
+    //         optionsTokenProxy.balanceOf(address(this))
+    //     );
+
+    //     fixture_prepareOptionToken(
+    //         amount,
+    //         address(strategySonneProxy),
+    //         optionsTokenProxy,
+    //         tokenAdmin
+    //     );
+    //     vm.startPrank(tokenAdmin);
+    //     optionsTokenProxy.mint(address(this), amountOptions);
+    //     vm.stopPrank();
+    //     console2.log(
+    //         "2. Balance: ",
+    //         optionsTokenProxy.balanceOf(address(this))
+    //     );
+    //     console2.log(
+    //         "1. UBalance: ",
+    //         underlyingToken.balanceOf(address(exerciser))
+    //     );
+    //     paymentToken.approve(
+    //         address(exerciser),
+    //         paymentToken.balanceOf(address(this))
+    //     );
+    //     optionsTokenProxy.exercise(
+    //         amountOptions,
+    //         address(this),
+    //         address(exerciser),
+    //         exerciseParams
+    //     );
+    //     console2.log(
+    //         "2. UBalance: ",
+    //         underlyingToken.balanceOf(address(exerciser))
+    //     );
+    //     vm.startPrank(keeper);
+    //     /* Assertion */
+    //     vm.expectRevert(
+    //         bytes4(keccak256("OptionsCompounder__NotEnoughUnderlyingTokens()"))
+    //     );
+    //     strategySonneProxy.harvestOTokens(
+    //         amount,
+    //         address(exerciser),
+    //         NON_ZERO_PROFIT
+    //     );
+    //     vm.stopPrank();
+    // }
 }

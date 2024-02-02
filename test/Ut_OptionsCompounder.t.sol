@@ -9,7 +9,7 @@ import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {UtMock} from "./mocks/UtMock.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "./mocks/ReaperSwapper.sol";
+import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IThenaRamRouter} from "vault-v2/ReaperSwapper.sol";
 import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 
