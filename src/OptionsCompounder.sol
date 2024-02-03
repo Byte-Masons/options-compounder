@@ -179,6 +179,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
     function setAddressProvider(address _addressProvider) external onlyAdmins {
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
+        lendingPool = ILendingPool(addressProvider.getLendingPool());
     }
 
     /**
