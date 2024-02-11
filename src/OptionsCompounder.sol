@@ -18,7 +18,7 @@ import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 enum ExchangeType {
     UniV2,
     Bal,
-    ThenaRam,
+    Velo,
     UniV3
 }
 
@@ -72,10 +72,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     uint256[] public maxSwapSlippages;
 
     /* Events */
-    event OTokenCompounded(
-        uint256 indexed gainInWant,
-        uint256 indexed returned
-    );
+    event OTokenCompounded(uint256 indexed gainInWant, uint256 indexed returned);
 
     /* Modifiers */
     modifier onlyKeeper() {
@@ -108,7 +105,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      * @param _maxSwapSlippages - max slippages acceptable for all swaps in the contract
      * @param _swapProps - swap properites for all swaps in the contract
      * @param _oracles - oracles used in all swaps in the contract
-     * */
+     *
+     */
     function __OptionsCompounder_init(
         address _optionToken,
         address _addressProvider,
@@ -117,9 +115,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         IOracle[] memory _oracles
     ) internal onlyInitializing {
         if (
-            _swapProps.length != uint256(SwapIdx.MAX) ||
-            _oracles.length != uint256(SwapIdx.MAX) ||
-            _maxSwapSlippages.length != uint256(SwapIdx.MAX)
+            _swapProps.length != uint256(SwapIdx.MAX) || _oracles.length != uint256(SwapIdx.MAX)
+                || _maxSwapSlippages.length != uint256(SwapIdx.MAX)
         ) {
             revert OptionsCompounder__WrongNumberOfParams();
         }
@@ -137,7 +134,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         flashloanFinished = true;
     }
 
-    /***************************** Setters ***********************************/
+    /**
+     * Setters **********************************
+     */
     /**
      * @notice Sets option token address
      * @dev Can be executed only by admins
@@ -147,9 +146,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         optionToken = IOptionsToken(_optionToken);
     }
 
-    function setMaxSwapSlippage(
-        uint256[] memory _maxSwapSlippages
-    ) external onlyAdmins {
+    function setMaxSwapSlippage(uint256[] memory _maxSwapSlippages) external onlyAdmins {
         if (_maxSwapSlippages.length != uint256(SwapIdx.MAX)) {
             revert OptionsCompounder__WrongNumberOfParams();
         }
@@ -161,9 +158,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         maxSwapSlippages = _maxSwapSlippages;
     }
 
-    function configSwapProps(
-        SwapProps[] memory _swapProps
-    ) external onlyAdmins {
+    function configSwapProps(SwapProps[] memory _swapProps) external onlyAdmins {
         if (_swapProps.length != uint256(SwapIdx.MAX)) {
             revert OptionsCompounder__WrongNumberOfParams();
         }
@@ -189,11 +184,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      * @param exerciseContract - address of exercise contract (DiscountContract)
      * @param minWantAmount - minimal amount of want when the flashloan is considered as profitable
      */
-    function harvestOTokens(
-        uint256 amount,
-        address exerciseContract,
-        uint256 minWantAmount
-    ) external onlyKeeper {
+    function harvestOTokens(uint256 amount, address exerciseContract, uint256 minWantAmount) external onlyKeeper {
         /* Check exercise contract validity */
         if (optionToken.isExerciseContract(exerciseContract) == false) {
             revert OptionsCompounder__NotExerciseContract();
@@ -213,21 +204,14 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         assets[0] = address(paymentToken);
 
         uint256[] memory amounts = new uint256[](1);
-        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(
-            amount
-        );
+        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(amount);
 
         // 0 = no debt, 1 = stable, 2 = variable
         uint256[] memory modes = new uint256[](1);
         modes[0] = 0;
 
         /* necesary params used during flashloan execution */
-        bytes memory params = abi.encode(
-            amount,
-            exerciseContract,
-            initialBalance,
-            minWantAmount
-        );
+        bytes memory params = abi.encode(amount, exerciseContract, initialBalance, minWantAmount);
         flashloanFinished = false;
 
         lendingPool.flashLoan(
@@ -261,9 +245,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             revert OptionsCompounder__FlashloanNotTriggered();
         }
         if (
-            assets.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
-            amounts.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
-            premiums.length > MIN_NR_OF_FLASHLOAN_ASSETS
+            assets.length > MIN_NR_OF_FLASHLOAN_ASSETS || amounts.length > MIN_NR_OF_FLASHLOAN_ASSETS
+                || premiums.length > MIN_NR_OF_FLASHLOAN_ASSETS
         ) {
             revert OptionsCompounder__TooMuchAssetsLoaned();
         }
@@ -273,7 +256,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         return true;
     }
 
-    /** @dev Private function that helps to execute flashloan and makes it more modular
+    /**
+     * @dev Private function that helps to execute flashloan and makes it more modular
      * Emits event with gain from the option exercise after repayment of all debt from flashloan
      * and amount of repaid assets
      *  @param asset - list of assets flash loaned (only one asset allowed in this case)
@@ -281,18 +265,11 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      *  @param premium - list of premiums for flash loaned assets (only one premium allowed in this case)
      *  @param params - encoded data about options amount, exercise contract address, initial balance and minimal want amount
      */
-    function exerciseOptionAndReturnDebt(
-        address asset,
-        uint256 amount,
-        uint256 premium,
-        bytes calldata params
-    ) private {
-        (
-            uint256 optionsAmount,
-            address exerciserContract,
-            uint256 initialBalance,
-            uint256 minWantAmount
-        ) = abi.decode(params, (uint256, address, uint256, uint256));
+    function exerciseOptionAndReturnDebt(address asset, uint256 amount, uint256 premium, bytes calldata params)
+        private
+    {
+        (uint256 optionsAmount, address exerciserContract, uint256 initialBalance, uint256 minWantAmount) =
+            abi.decode(params, (uint256, address, uint256, uint256));
         uint256 gainInPaymentToken = 0;
         uint256 totalAmountToPay = amount + premium;
         uint256 gainInWantToken = 0;
@@ -304,39 +281,24 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
         /* Get underlying and payment tokens to make sure there is no change between 
         harvest and excersice */
-        IERC20 underlyingToken = DiscountExercise(exerciserContract)
-            .underlyingToken();
-        IERC20 paymentToken = DiscountExercise(exerciserContract)
-            .paymentToken();
-        uint256 initialWantBalance = IERC20(wantToken()).balanceOf(
-            address(this)
-        );
+        IERC20 underlyingToken = DiscountExercise(exerciserContract).underlyingToken();
+        IERC20 paymentToken = DiscountExercise(exerciserContract).paymentToken();
+        uint256 initialWantBalance = IERC20(wantToken()).balanceOf(address(this));
         /* Asset and paymentToken should be the same addresses */
         if (asset != address(paymentToken)) {
             revert OptionsCompounder__AssetNotEqualToPaymentToken();
         }
-        bytes memory exerciseParams = abi.encode(
-            DiscountExerciseParams({
-                maxPaymentAmount: amount,
-                deadline: type(uint256).max
-            })
-        );
+        bytes memory exerciseParams =
+            abi.encode(DiscountExerciseParams({maxPaymentAmount: amount, deadline: type(uint256).max}));
         if (underlyingToken.balanceOf(exerciserContract) < optionsAmount) {
             revert OptionsCompounder__NotEnoughUnderlyingTokens();
         }
         /* Approve spending option token */
         paymentToken.approve(exerciserContract, amount);
         /* Exercise in order to get underlying token */
-        optionToken.exercise(
-            optionsAmount,
-            address(this),
-            exerciserContract,
-            exerciseParams
-        );
+        optionToken.exercise(optionsAmount, address(this), exerciserContract, exerciseParams);
         balanceOfUnderlyingToken = underlyingToken.balanceOf(address(this));
-        minAmountOutData[
-            uint256(SwapIdx.UNDERLYING_TO_PAYMENT)
-        ] = _getMinAmountOutData(
+        minAmountOutData[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)] = _getMinAmountOutData(
             balanceOfUnderlyingToken,
             maxSwapSlippages[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)],
             SwapIdx.UNDERLYING_TO_PAYMENT
@@ -368,12 +330,8 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
             /* Approve the underlying token to make swap */
             IERC20(asset).approve(swapperSwaps(), gainInPaymentToken);
             /* Get minimal amount of data */
-            minAmountOutData[
-                uint256(SwapIdx.PAYMENT_TO_WANT)
-            ] = _getMinAmountOutData(
-                gainInPaymentToken,
-                maxSwapSlippages[uint256(SwapIdx.PAYMENT_TO_WANT)],
-                SwapIdx.PAYMENT_TO_WANT
+            minAmountOutData[uint256(SwapIdx.PAYMENT_TO_WANT)] = _getMinAmountOutData(
+                gainInPaymentToken, maxSwapSlippages[uint256(SwapIdx.PAYMENT_TO_WANT)], SwapIdx.PAYMENT_TO_WANT
             );
             _generalSwap(
                 swapProps[uint256(SwapIdx.PAYMENT_TO_WANT)].exchangeTypes,
@@ -384,9 +342,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 swapProps[uint256(SwapIdx.PAYMENT_TO_WANT)].exchangeAddress
             );
         }
-        gainInWantToken =
-            IERC20(wantToken()).balanceOf(address(this)) -
-            initialWantBalance;
+        gainInWantToken = IERC20(wantToken()).balanceOf(address(this)) - initialWantBalance;
         if (gainInWantToken < minWantAmount) {
             revert OptionsCompounder__FlashloanNotProfitable();
         }
@@ -396,31 +352,29 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         emit OTokenCompounded(gainInWantToken, totalAmountToPay);
     }
 
-    /** @dev Private function that calculates minimal amount token out of swap using oracles
+    /**
+     * @dev Private function that calculates minimal amount token out of swap using oracles
      *  @param _amountIn - amount of token to be swapped
      *  @param _maxSlippage - max allowed slippage
      *  @param _idx - index of swap
      */
-    function _getMinAmountOutData(
-        uint256 _amountIn,
-        uint256 _maxSlippage,
-        SwapIdx _idx
-    ) private view returns (MinAmountOutData memory) {
+    function _getMinAmountOutData(uint256 _amountIn, uint256 _maxSlippage, SwapIdx _idx)
+        private
+        view
+        returns (MinAmountOutData memory)
+    {
         MinAmountOutData memory minAmountOutData;
         uint256 minAmountOut = 0;
         /* Get price from oracle */
         uint256 price = oracles[uint256(_idx)].getPrice();
         /* Deduct slippage amount from predicted amount */
-        minAmountOut = ((_amountIn.mulWadUp(price)) -
-            (((_amountIn.mulWadUp(price)) * _maxSlippage) / PERCENTAGE));
-        minAmountOutData = MinAmountOutData(
-            MinAmountOutKind.Absolute,
-            minAmountOut
-        );
+        minAmountOut = ((_amountIn.mulWadUp(price)) - (((_amountIn.mulWadUp(price)) * _maxSlippage) / PERCENTAGE));
+        minAmountOutData = MinAmountOutData(MinAmountOutKind.Absolute, minAmountOut);
         return minAmountOutData;
     }
 
-    /** @dev Private function that allow to swap via multiple exchange types
+    /**
+     * @dev Private function that allow to swap via multiple exchange types
      *  @param exType - type of exchange
      *  @param tokenIn - address of token in
      *  @param tokenOut - address of token out
@@ -438,48 +392,22 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     ) private {
         ISwapperSwaps swapper = ISwapperSwaps(swapperSwaps());
         if (exType == ExchangeType.UniV2) {
-            swapper.swapUniV2(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
+            swapper.swapUniV2(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
         } else if (exType == ExchangeType.Bal) {
-            swapper.swapBal(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
-        } else if (exType == ExchangeType.ThenaRam) {
-            swapper.swapThenaRam(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
+            swapper.swapBal(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
+        } else if (exType == ExchangeType.Velo) {
+            swapper.swapVelo(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
         } else if (exType == ExchangeType.UniV3) {
-            swapper.swapUniV3(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
+            swapper.swapUniV3(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
         } else {
             revert OptionsCompounder__InvalidExchangeType(uint256(exType));
         }
     }
 
-    /***************************** Getters ***********************************/
-    function ADDRESSES_PROVIDER()
-        external
-        view
-        returns (ILendingPoolAddressesProvider)
-    {
+    /**
+     * Getters **********************************
+     */
+    function ADDRESSES_PROVIDER() external view returns (ILendingPoolAddressesProvider) {
         return addressProvider;
     }
 
@@ -487,7 +415,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         return lendingPool;
     }
 
-    /** @dev Returns number of params needed to pass through swapProps, oracles and maxSwapSlippages */
+    /**
+     * @dev Returns number of params needed to pass through swapProps, oracles and maxSwapSlippages
+     */
     function requiredParamsLength() external pure returns (uint256) {
         return uint256(SwapIdx.MAX);
     }
@@ -509,20 +439,19 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      * @dev Subclasses should override this to specify their unique role-checking criteria.
      * @return Returns bool value. {true} if {_account} has been granted {_role}.
      */
-    function hasRoleForOptionsCompounder(
-        bytes32 _role,
-        address _account
-    ) internal view virtual returns (bool);
+    function hasRoleForOptionsCompounder(bytes32 _role, address _account) internal view virtual returns (bool);
 
     /**
      * @dev Shall be implemented in the parent contract
      * @return Keeper role of the strategy
-     * */
+     *
+     */
     function getKeeperRole() internal pure virtual returns (bytes32);
 
     /**
      * @dev Shall be implemented in the parent contract
      * @return Admin roles of the strategy
-     * */
+     *
+     */
     function getAdminRoles() internal pure virtual returns (bytes32[] memory);
 }

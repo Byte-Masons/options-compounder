@@ -38,7 +38,7 @@ contract OptionsTokenTest is Common {
         /* Common assignments */
         ExchangeType[] memory exchangeTypes = new ExchangeType[](2);
         exchangeTypes[0] = ExchangeType.Bal;
-        exchangeTypes[1] = ExchangeType.Bal;
+        exchangeTypes[1] = ExchangeType.Velo;
         sousdc = CErc20I(OP_SOOP);
         nativeToken = IERC20(OP_WETH);
         paymentToken = nativeToken;
@@ -49,6 +49,7 @@ contract OptionsTokenTest is Common {
         balancerVault = OP_BEETX_VAULT;
         routerV2 = ISwapRouter(OP_UNIV3_ROUTERV);
         univ3Factory = IUniswapV3Factory(OP_UNIV3_FACTORY);
+        veloRouter = IVeloRouter(OP_VELO_ROUTER);
 
         /* Setup accounts */
         fixture_setupAccountsAndFees(2500, 7500);
@@ -72,10 +73,12 @@ contract OptionsTokenTest is Common {
         /* Variables */
         SwapProps[] memory swapProps = new SwapProps[](2);
         swapProps[0] = SwapProps(OP_BEETX_VAULT, ExchangeType.Bal);
-        swapProps[1] = SwapProps(OP_BEETX_VAULT, ExchangeType.Bal);
+        swapProps[1] = SwapProps(OP_VELO_ROUTER, ExchangeType.Velo);
         uint256 targetLTV = 0.0001 ether;
 
-        /**** Contract deployments and configurations ****/
+        /**
+         * Contract deployments and configurations ***
+         */
         helper = new Helper();
 
         /* Reaper deployment and configuration */
@@ -106,9 +109,7 @@ contract OptionsTokenTest is Common {
         MockBalancerTwapOracle paymentWantMock = new MockBalancerTwapOracle(
             tokens
         );
-        IUniswapV3Pool univ3Pool = IUniswapV3Pool(
-            univ3Factory.getPool(tokens[0], tokens[1], 500)
-        );
+        IUniswapV3Pool univ3Pool = IUniswapV3Pool(univ3Factory.getPool(tokens[0], tokens[1], 500));
         paymentWantOracle = new UniswapV3Oracle(
             univ3Pool,
             tokens[0],
@@ -127,11 +128,7 @@ contract OptionsTokenTest is Common {
         optionsToken = new OptionsToken();
         tmpProxy = new ERC1967Proxy(address(optionsToken), "");
         optionsTokenProxy = OptionsToken(address(tmpProxy));
-        optionsTokenProxy.initialize(
-            "TIT Call Option Token",
-            "oTIT",
-            tokenAdmin
-        );
+        optionsTokenProxy.initialize("TIT Call Option Token", "oTIT", tokenAdmin);
         /* Exercise contract deployment */
         exerciser = new DiscountExercise(
             optionsTokenProxy,
@@ -196,17 +193,10 @@ contract OptionsTokenTest is Common {
         /* Prepare EOA and contracts for tests */
         helper.wrapEth{value: AMOUNT * 2}(address(nativeToken));
 
-        MinAmountOutData memory minAmountOutData = MinAmountOutData(
-            MinAmountOutKind.Absolute,
-            0
-        );
+        MinAmountOutData memory minAmountOutData = MinAmountOutData(MinAmountOutKind.Absolute, 0);
         paymentToken.approve(address(reaperSwapper), AMOUNT);
         reaperSwapper.swapBal(
-            address(paymentToken),
-            address(underlyingToken),
-            AMOUNT,
-            minAmountOutData,
-            OP_BEETX_VAULT
+            address(paymentToken), address(underlyingToken), AMOUNT, minAmountOutData, OP_BEETX_VAULT, block.timestamp
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
         initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
@@ -221,169 +211,92 @@ contract OptionsTokenTest is Common {
 
     function test_flashloanPositiveScenarioSonne(uint256 amount) public {
         /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
+        amount = bound(amount, MIN_OATH_FOR_FUZZING, underlyingToken.balanceOf(address(exerciser)));
 
         /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
-        fixture_prepareOptionToken(
-            amount,
-            address(strategySonneProxy),
-            optionsTokenProxy,
-            tokenAdmin
-        );
+        fixture_prepareOptionToken(amount, address(strategySonneProxy), optionsTokenProxy, tokenAdmin);
 
         /* Check balances before compounding */
-        uint256 paymentTokenBalance = paymentToken.balanceOf(
-            address(strategySonneProxy)
-        );
+        uint256 paymentTokenBalance = paymentToken.balanceOf(address(strategySonneProxy));
         uint256 wantBalance = wantToken.balanceOf(address(strategySonneProxy));
 
         vm.startPrank(keeper);
         /* already approved in fixture_prepareOptionToken */
-        strategySonneProxy.harvestOTokens(
-            amount,
-            address(exerciser),
-            NON_ZERO_PROFIT
-        );
+        strategySonneProxy.harvestOTokens(amount, address(exerciser), NON_ZERO_PROFIT);
         vm.stopPrank();
 
         /* Assertions */
+        assertEq(wantToken.balanceOf(address(strategySonneProxy)) > wantBalance, true, "Gain not greater than 0");
         assertEq(
-            wantToken.balanceOf(address(strategySonneProxy)) > wantBalance,
-            true,
-            "Gain not greater than 0"
-        );
-        assertEq(
-            paymentTokenBalance <=
-                paymentToken.balanceOf(address(strategySonneProxy)),
+            paymentTokenBalance <= paymentToken.balanceOf(address(strategySonneProxy)),
             true,
             "Lower paymentToken balance than before"
         );
         assertEq(
-            wantBalance <= wantToken.balanceOf(address(strategySonneProxy)),
-            true,
-            "Lower want balance than before"
+            wantBalance <= wantToken.balanceOf(address(strategySonneProxy)), true, "Lower want balance than before"
         );
-        assertEq(
-            0 == optionsTokenProxy.balanceOf(address(strategySonneProxy)),
-            true,
-            "Options token balance is not 0"
-        );
+        assertEq(0 == optionsTokenProxy.balanceOf(address(strategySonneProxy)), true, "Options token balance is not 0");
     }
 
     function test_flashloanPositiveScenarioGranary(uint256 amount) public {
         /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
+        amount = bound(amount, MIN_OATH_FOR_FUZZING, underlyingToken.balanceOf(address(exerciser)));
 
         /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
-        fixture_prepareOptionToken(
-            amount,
-            address(strategyGranaryProxy),
-            optionsTokenProxy,
-            tokenAdmin
-        );
+        fixture_prepareOptionToken(amount, address(strategyGranaryProxy), optionsTokenProxy, tokenAdmin);
 
         /* Check balances before compounding */
-        uint256 paymentTokenBalance = paymentToken.balanceOf(
-            address(strategyGranaryProxy)
-        );
-        uint256 wantBalance = wantToken.balanceOf(
-            address(strategyGranaryProxy)
-        );
+        uint256 paymentTokenBalance = paymentToken.balanceOf(address(strategyGranaryProxy));
+        uint256 wantBalance = wantToken.balanceOf(address(strategyGranaryProxy));
 
         vm.startPrank(keeper);
 
         /* Already approved in fixture_prepareOptionToken */
-        strategyGranaryProxy.harvestOTokens(
-            amount,
-            address(exerciser),
-            NON_ZERO_PROFIT
-        );
+        strategyGranaryProxy.harvestOTokens(amount, address(exerciser), NON_ZERO_PROFIT);
         vm.stopPrank();
 
         /* Assertions */
+        assertEq(wantToken.balanceOf(address(strategyGranaryProxy)) > wantBalance, true, "Gain not greater than 0");
         assertEq(
-            wantToken.balanceOf(address(strategyGranaryProxy)) > wantBalance,
-            true,
-            "Gain not greater than 0"
-        );
-        assertEq(
-            paymentTokenBalance <=
-                paymentToken.balanceOf(address(strategyGranaryProxy)),
+            paymentTokenBalance <= paymentToken.balanceOf(address(strategyGranaryProxy)),
             true,
             "Lower paymentToken balance than before"
         );
         assertEq(
-            wantBalance <= wantToken.balanceOf(address(strategyGranaryProxy)),
-            true,
-            "Lower want balance than before"
+            wantBalance <= wantToken.balanceOf(address(strategyGranaryProxy)), true, "Lower want balance than before"
         );
         assertEq(
-            0 == optionsTokenProxy.balanceOf(address(strategyGranaryProxy)),
-            true,
-            "Options token balance is not 0"
+            0 == optionsTokenProxy.balanceOf(address(strategyGranaryProxy)), true, "Options token balance is not 0"
         );
     }
 
-    function test_accessControlFunctionsChecks(
-        address hacker,
-        address randomOption,
-        uint256 amount
-    ) public {
+    function test_accessControlFunctionsChecks(address hacker, address randomOption, uint256 amount) public {
         /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
+        amount = bound(amount, MIN_OATH_FOR_FUZZING, underlyingToken.balanceOf(address(exerciser)));
         vm.assume(
-            hacker != owner &&
-                hacker != keeper &&
-                hacker != management1 &&
-                hacker != management2 &&
-                hacker != management3
+            hacker != owner && hacker != keeper && hacker != management1 && hacker != management2
+                && hacker != management3
         );
         SwapProps[] memory swapProps = new SwapProps[](2);
         IOracle[] memory oracles = new IOracle[](2);
         /* Hacker tries to perform harvest */
         vm.startPrank(hacker);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyKeeperAllowed()"))
-        );
-        strategySonneProxy.harvestOTokens(
-            amount,
-            address(exerciser),
-            NON_ZERO_PROFIT
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__OnlyKeeperAllowed()")));
+        strategySonneProxy.harvestOTokens(amount, address(exerciser), NON_ZERO_PROFIT);
 
         /* Hacker tries to manipulate contract configuration */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()")));
         strategySonneProxy.setOptionToken(randomOption);
 
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()")));
         strategySonneProxy.configSwapProps(swapProps);
 
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()")));
         strategySonneProxy.setOracles(oracles);
 
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__OnlyAdminsAllowed()")));
         uint256[] memory slippages = new uint256[](2);
         slippages[0] = 1000;
         slippages[0] = 2000;
@@ -410,43 +323,26 @@ contract OptionsTokenTest is Common {
 
         /* Passing wrong number of elements into configSwapProps */
         vm.startPrank(management1);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()")));
         strategySonneProxy.configSwapProps(swapProps);
 
         /* Passing wrong number of elements into setOracles */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__WrongNumberOfParams()")));
         strategySonneProxy.setOracles(oracles);
         /* Passing wrong number setMaxSwapSlippage */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__SlippageGreaterThanMax()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__SlippageGreaterThanMax()")));
         strategySonneProxy.setMaxSwapSlippage(maxSwapSlippages);
 
         vm.stopPrank();
     }
 
-    function test_flashloanNegativeScenario_highTwapValueAndMultiplier(
-        uint256 amount
-    ) public {
+    function test_flashloanNegativeScenario_highTwapValueAndMultiplier(uint256 amount) public {
         /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            1000 * MIN_OATH_FOR_FUZZING
-        );
+        amount = bound(amount, MIN_OATH_FOR_FUZZING, 1000 * MIN_OATH_FOR_FUZZING);
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
-        fixture_prepareOptionToken(
-            amount,
-            address(strategySonneProxy),
-            optionsTokenProxy,
-            tokenAdmin
-        );
+        fixture_prepareOptionToken(amount, address(strategySonneProxy), optionsTokenProxy, tokenAdmin);
 
         /* Set high slippage to allow unefficient swap - consider test it later and try to make flasloan unprofitable instead of swap revert*/
         // vm.startPrank(management1);
@@ -465,41 +361,25 @@ contract OptionsTokenTest is Common {
         underlyingPaymentMock.setTwapValue(initTwap + ((initTwap * 10) / 100));
 
         /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()")));
 
         vm.startPrank(keeper);
         /* Already approved in fixture_prepareOptionToken */
-        strategySonneProxy.harvestOTokens(
-            amount,
-            address(exerciser),
-            NON_ZERO_PROFIT
-        );
+        strategySonneProxy.harvestOTokens(amount, address(exerciser), NON_ZERO_PROFIT);
         vm.stopPrank();
     }
 
-    function test_flashloanNegativeScenario_tooHighMinAmounOfWantExpected(
-        uint256 amount,
-        uint256 minAmountOfWant
-    ) public {
+    function test_flashloanNegativeScenario_tooHighMinAmounOfWantExpected(uint256 amount, uint256 minAmountOfWant)
+        public
+    {
         /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
+        amount = bound(amount, MIN_OATH_FOR_FUZZING, underlyingToken.balanceOf(address(exerciser)));
         /* Too high expectation of profit - together with high exerciser multiplier makes flashloan not profitable */
         minAmountOfWant = bound(minAmountOfWant, 1e22, UINT256_MAX);
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
-        fixture_prepareOptionToken(
-            amount,
-            address(strategySonneProxy),
-            optionsTokenProxy,
-            tokenAdmin
-        );
+        fixture_prepareOptionToken(amount, address(strategySonneProxy), optionsTokenProxy, tokenAdmin);
 
         /* Decrease option discount in order to make redemption not profitable */
         /* Notice: Multiplier must be higher than denom because of oracle inaccuracy (initTwap) or just change initTwap */
@@ -508,29 +388,16 @@ contract OptionsTokenTest is Common {
         vm.stopPrank();
 
         /* Notice: additional protection is in exerciser: Exercise__SlippageTooHigh */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()")));
         /* Already approved in fixture_prepareOptionToken */
         vm.startPrank(keeper);
-        strategySonneProxy.harvestOTokens(
-            amount,
-            address(exerciser),
-            minAmountOfWant
-        );
+        strategySonneProxy.harvestOTokens(amount, address(exerciser), minAmountOfWant);
         vm.stopPrank();
     }
 
-    function test_callExecuteOperationWithoutFlashloanTrigger(
-        uint256 amount,
-        address executor
-    ) public {
+    function test_callExecuteOperationWithoutFlashloanTrigger(uint256 amount, address executor) public {
         /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
+        amount = bound(amount, MIN_OATH_FOR_FUZZING, underlyingToken.balanceOf(address(exerciser)));
 
         /* Argument creation */
         address[] memory assets = new address[](1);
@@ -542,51 +409,25 @@ contract OptionsTokenTest is Common {
 
         vm.startPrank(executor);
         /* Assertion */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__FlashloanNotTriggered()"))
-        );
-        strategySonneProxy.executeOperation(
-            assets,
-            amounts,
-            premiums,
-            msg.sender,
-            params
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__FlashloanNotTriggered()")));
+        strategySonneProxy.executeOperation(assets, amounts, premiums, msg.sender, params);
         vm.stopPrank();
     }
 
-    function test_harvestCallWithWrongExerciseContract(
-        uint256 amount,
-        address fuzzedExerciser
-    ) public {
+    function test_harvestCallWithWrongExerciseContract(uint256 amount, address fuzzedExerciser) public {
         /* Test vectors definition */
-        amount = bound(
-            amount,
-            MIN_OATH_FOR_FUZZING,
-            underlyingToken.balanceOf(address(exerciser))
-        );
+        amount = bound(amount, MIN_OATH_FOR_FUZZING, underlyingToken.balanceOf(address(exerciser)));
 
         vm.assume(fuzzedExerciser != address(exerciser));
 
         /* Prepare option tokens - distribute them to the specified strategy
         and approve for spending */
-        fixture_prepareOptionToken(
-            amount,
-            address(strategySonneProxy),
-            optionsTokenProxy,
-            tokenAdmin
-        );
+        fixture_prepareOptionToken(amount, address(strategySonneProxy), optionsTokenProxy, tokenAdmin);
 
         vm.startPrank(keeper);
         /* Assertion */
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__NotExerciseContract()"))
-        );
-        strategySonneProxy.harvestOTokens(
-            amount,
-            fuzzedExerciser,
-            NON_ZERO_PROFIT
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__NotExerciseContract()")));
+        strategySonneProxy.harvestOTokens(amount, fuzzedExerciser, NON_ZERO_PROFIT);
         vm.stopPrank();
     }
 

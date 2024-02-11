@@ -4,7 +4,14 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IThenaRamRouter, ISwapRouter, UniV3SwapData} from "vault-v2/ReaperSwapper.sol";
+import {
+    ReaperSwapper,
+    MinAmountOutData,
+    MinAmountOutKind,
+    IVeloRouter,
+    ISwapRouter,
+    UniV3SwapData
+} from "vault-v2/ReaperSwapper.sol";
 import {OptionsToken} from "optionsToken/src/OptionsToken.sol";
 import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
@@ -53,6 +60,8 @@ bytes32 constant OP_WETH_OP_USDC_BPT = 0x39965c9dab5448482cf7e002f583c812ceb5304
 address constant OP_BEETX_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 address constant OP_UNIV3_ROUTERV = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
 address constant OP_UNIV3_FACTORY = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
+address constant OP_VELO_ROUTER = 0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858;
+address constant OP_VELO_FACTORY = 0xF1046053aa5682b4F9a81b5481394DA16BE5FF5a;
 
 /* BSC */
 address constant BSC_BUSD = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
@@ -79,7 +88,7 @@ contract Common is Test {
     IERC20 paymentToken;
     IERC20 underlyingToken;
     IERC20 wantToken;
-    IThenaRamRouter thenaRamRouter;
+    IVeloRouter veloRouter;
     ISwapRouter routerV2;
     IUniswapV3Factory univ3Factory;
 
@@ -136,9 +145,7 @@ contract Common is Test {
         vm.stopPrank();
     }
 
-    function fixture_configureSwapper(
-        ExchangeType[] memory exchangeTypes
-    ) public {
+    function fixture_configureSwapper(ExchangeType[] memory exchangeTypes) public {
         require(exchangeTypes.length == 2, "Length not 2");
         address[2][] memory paths = new address[2][](exchangeTypes.length);
         paths[0] = [address(underlyingToken), address(paymentToken)];
@@ -150,44 +157,15 @@ contract Common is Test {
                 bpts[0] = paymentUnderlyingBpt;
                 bpts[1] = paymentWantBpt;
                 /* Configure balancer like dexes */
-                reaperSwapper.updateBalSwapPoolID(
-                    paths[idx][0],
-                    paths[idx][1],
-                    balancerVault,
-                    bpts[idx]
-                );
-                reaperSwapper.updateBalSwapPoolID(
-                    paths[idx][1],
-                    paths[idx][0],
-                    balancerVault,
-                    bpts[idx]
-                );
-            } else if (exchangeTypes[idx] == ExchangeType.ThenaRam) {
+                reaperSwapper.updateBalSwapPoolID(paths[idx][0], paths[idx][1], balancerVault, bpts[idx]);
+                reaperSwapper.updateBalSwapPoolID(paths[idx][1], paths[idx][0], balancerVault, bpts[idx]);
+            } else if (exchangeTypes[idx] == ExchangeType.Velo) {
                 /* Configure thena ram like dexes */
-                IThenaRamRouter.route[]
-                    memory thenaPath = new IThenaRamRouter.route[](1);
-                thenaPath[0] = IThenaRamRouter.route(
-                    paths[idx][0],
-                    paths[idx][1],
-                    false
-                );
-                reaperSwapper.updateThenaRamSwapPath(
-                    paths[idx][0],
-                    paths[idx][1],
-                    address(thenaRamRouter),
-                    thenaPath
-                );
-                thenaPath[0] = IThenaRamRouter.route(
-                    paths[idx][1],
-                    paths[idx][0],
-                    false
-                );
-                reaperSwapper.updateThenaRamSwapPath(
-                    paths[idx][1],
-                    paths[idx][0],
-                    address(thenaRamRouter),
-                    thenaPath
-                );
+                IVeloRouter.Route[] memory veloPath = new IVeloRouter.Route[](1);
+                veloPath[0] = IVeloRouter.Route(paths[idx][0], paths[idx][1], false, OP_VELO_FACTORY);
+                reaperSwapper.updateVeloSwapPath(paths[idx][0], paths[idx][1], address(veloRouter), veloPath);
+                veloPath[0] = IVeloRouter.Route(paths[idx][1], paths[idx][0], false, OP_VELO_FACTORY);
+                reaperSwapper.updateVeloSwapPath(paths[idx][1], paths[idx][0], address(veloRouter), veloPath);
             } else if (exchangeTypes[idx] == ExchangeType.UniV3) {
                 /* Configure univ3 like dexes */
                 uint24[] memory univ3Fees = new uint24[](1);
@@ -196,16 +174,8 @@ contract Common is Test {
 
                 univ3Path[0] = paths[idx][0];
                 univ3Path[1] = paths[idx][1];
-                UniV3SwapData memory swapPathAndFees = UniV3SwapData(
-                    univ3Path,
-                    univ3Fees
-                );
-                reaperSwapper.updateUniV3SwapPath(
-                    paths[idx][0],
-                    paths[idx][1],
-                    address(routerV2),
-                    swapPathAndFees
-                );
+                UniV3SwapData memory swapPathAndFees = UniV3SwapData(univ3Path, univ3Fees);
+                reaperSwapper.updateUniV3SwapPath(paths[idx][0], paths[idx][1], address(routerV2), swapPathAndFees);
 
                 // univ3Path[0] = paths[idx][1];
                 // univ3Path[1] = paths[idx][0];
@@ -223,9 +193,7 @@ contract Common is Test {
         }
     }
 
-    function fixture_getOracles(
-        ExchangeType[] memory exchangeTypes
-    ) public returns (IOracle[] memory oracles) {
+    function fixture_getOracles(ExchangeType[] memory exchangeTypes) public returns (IOracle[] memory oracles) {
         require(exchangeTypes.length == 2, "Length not 2");
         oracles = new IOracle[](exchangeTypes.length);
 
@@ -255,28 +223,10 @@ contract Common is Test {
                 // );
                 // oracles[idx] = underlyingPaymentOracle;
                 revert Common__NotYetImplemented();
-            } else if (exchangeTypes[idx] == ExchangeType.ThenaRam) {
-                IThenaRamRouter router = IThenaRamRouter(
-                    payable(address(thenaRamRouter))
-                );
-                ThenaOracle underlyingPaymentOracle;
-                address pair = router.pairFor(
-                    paths[idx][0],
-                    paths[idx][1],
-                    false
-                );
-                underlyingPaymentOracle = new ThenaOracle(
-                    IThenaPair(pair),
-                    tokens[idx],
-                    owner,
-                    ORACLE_SECS,
-                    ORACLE_MIN_PRICE
-                );
-                oracles[idx] = IOracle(address(underlyingPaymentOracle));
+            } else if (exchangeTypes[idx] == ExchangeType.Velo) {
+                revert Common__NotYetImplemented();
             } else if (exchangeTypes[idx] == ExchangeType.UniV3) {
-                IUniswapV3Pool univ3Pool = IUniswapV3Pool(
-                    univ3Factory.getPool(paths[0][idx], paths[1][idx], 500)
-                );
+                IUniswapV3Pool univ3Pool = IUniswapV3Pool(univ3Factory.getPool(paths[0][idx], paths[1][idx], 500));
                 UniswapV3Oracle univ3Oracle = new UniswapV3Oracle(
                     univ3Pool,
                     tokens[idx],
@@ -292,25 +242,21 @@ contract Common is Test {
         }
     }
 
-    function fixture_getSwapProps(
-        ExchangeType[] memory exchangeTypes
-    ) public view returns (SwapProps[] memory swapProps) {
+    function fixture_getSwapProps(ExchangeType[] memory exchangeTypes)
+        public
+        view
+        returns (SwapProps[] memory swapProps)
+    {
         require(exchangeTypes.length == 2, "Length not 2");
         swapProps = new SwapProps[](exchangeTypes.length);
 
         for (uint8 idx = 0; idx < exchangeTypes.length; idx++) {
             if (exchangeTypes[idx] == ExchangeType.Bal) {
                 revert Common__NotYetImplemented();
-            } else if (exchangeTypes[idx] == ExchangeType.ThenaRam) {
-                swapProps[idx] = SwapProps(
-                    address(thenaRamRouter),
-                    ExchangeType.ThenaRam
-                );
+            } else if (exchangeTypes[idx] == ExchangeType.Velo) {
+                swapProps[idx] = SwapProps(address(veloRouter), ExchangeType.Velo);
             } else if (exchangeTypes[idx] == ExchangeType.UniV3) {
-                swapProps[idx] = SwapProps(
-                    address(routerV2),
-                    ExchangeType.UniV3
-                );
+                swapProps[idx] = SwapProps(address(routerV2), ExchangeType.UniV3);
             } else {
                 revert Common__NotYetImplemented();
             }

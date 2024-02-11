@@ -9,7 +9,7 @@ import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {ERC1967Proxy} from "oz/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
 import {UtMock} from "./mocks/UtMock.sol";
-import {ReaperSwapper, MinAmountOutData, MinAmountOutKind, IThenaRamRouter} from "vault-v2/ReaperSwapper.sol";
+import {ReaperSwapper, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {SwapProps, ExchangeType} from "../src/OptionsCompounder.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 
@@ -74,7 +74,9 @@ contract OptionsTokenTest is Test {
         uint256 factor = 5000; // < PERCENTAGE
         uint256 premium = 100;
 
-        /*** Test vectors definitions ***/
+        /**
+         * Test vectors definitions **
+         */
 
         /* Payment token amount which is transfered at init and imitates initial 
         balance of the strategy before flashloan compound */
@@ -84,28 +86,22 @@ contract OptionsTokenTest is Test {
         tokens (initial amount + amount transferred after swap) 
         Cannot be higher than (UINT256_MAX / PERCENTAGE) - 11.5e54 ETH */
         vm.assume(
-            paymentAmountToMint > (initialPaymentBalance + premium) &&
-                paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
+            paymentAmountToMint > (initialPaymentBalance + premium) && paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
         );
 
         /* Maximum amount of OTokens possible to simlate assuming minted and initial 
         amount of payment token */
-        uint256 maxAmountOfOTokens = ((paymentAmountToMint -
-            initialPaymentBalance) * PERCENTAGE) / factor;
+        uint256 maxAmountOfOTokens = ((paymentAmountToMint - initialPaymentBalance) * PERCENTAGE) / factor;
         vm.assume(oTokensAmount <= maxAmountOfOTokens);
 
         /* Payment balance after swap shall be greater than borrowed asset + premium and 
         less than minted asset - initial balance */
         uint256 borrowedAssetBalance = (oTokensAmount * factor) / PERCENTAGE;
         vm.assume(
-            paymentBalanceAfterSwap > (premium + borrowedAssetBalance) &&
-                paymentBalanceAfterSwap <
-                (paymentAmountToMint - initialPaymentBalance)
+            paymentBalanceAfterSwap > (premium + borrowedAssetBalance)
+                && paymentBalanceAfterSwap < (paymentAmountToMint - initialPaymentBalance)
         );
-        vm.assume(
-            paymentAmountToMint >
-                paymentBalanceAfterSwap + initialPaymentBalance
-        );
+        vm.assume(paymentAmountToMint > paymentBalanceAfterSwap + initialPaymentBalance);
 
         /* Want amount shall be grater than minWantAmount */
         minWantAmount = bound(minWantAmount, 1, 1e19);
@@ -162,45 +158,23 @@ contract OptionsTokenTest is Test {
 
         vm.startPrank(keeper);
         /* already approved in fixture_prepareOptionToken */
-        strategySonneProxy.harvestOTokens(
-            oTokensAmount,
-            address(utMock),
-            minWantAmount
-        );
+        strategySonneProxy.harvestOTokens(oTokensAmount, address(utMock), minWantAmount);
         vm.stopPrank();
 
         /* Check balances after compounding */
         /* Assertions */
         assertEq(
-            utMock.mockedUnderlyingWant().balanceOf(
-                address(strategySonneProxy)
-            ) > 0,
-            true,
-            "Gain not greater than 0"
+            utMock.mockedUnderlyingWant().balanceOf(address(strategySonneProxy)) > 0, true, "Gain not greater than 0"
         );
         assertEq(
-            (utMock.mockedPaymentToken().balanceOf(
-                address(strategySonneProxy)
-            ) - initialPaymentBalance) >=
-                (paymentBalanceAfterSwap - borrowedAssetBalance),
+            (utMock.mockedPaymentToken().balanceOf(address(strategySonneProxy)) - initialPaymentBalance)
+                >= (paymentBalanceAfterSwap - borrowedAssetBalance),
             true,
             "Lower payment balance than before"
         );
-        assertEq(
-            utMock.nrOfCallsSwapBal() == 2,
-            true,
-            "Number of calls swapBal not equal 2"
-        );
-        assertEq(
-            utMock.nrOfCallsExercise() == 1,
-            true,
-            "Number of calls swapBal not equal 1"
-        );
-        assertEq(
-            utMock.nrOfCallsFlashloan() == 1,
-            true,
-            "Number of calls swapBal not equal 1"
-        );
+        assertEq(utMock.nrOfCallsSwapBal() == 2, true, "Number of calls swapBal not equal 2");
+        assertEq(utMock.nrOfCallsExercise() == 1, true, "Number of calls swapBal not equal 1");
+        assertEq(utMock.nrOfCallsFlashloan() == 1, true, "Number of calls swapBal not equal 1");
     }
 
     function test_utFlashloanNegativeScenario_TooFewPaymentTokens(
@@ -215,7 +189,9 @@ contract OptionsTokenTest is Test {
         uint256 factor = 5000; // < PERCENTAGE
         uint256 premium = 100;
 
-        /*** Test vectors definitions ***/
+        /**
+         * Test vectors definitions **
+         */
 
         /* Payment token amount which is transfered at init and imitates initial 
         balance of the strategy before flashloan compound */
@@ -225,15 +201,12 @@ contract OptionsTokenTest is Test {
         tokens (initial amount + amount transferred after swap) 
         Cannot be higher than (UINT256_MAX / PERCENTAGE) - 11.5e54 ETH */
         vm.assume(
-            paymentAmountToMint > (initialPaymentBalance + premium) &&
-                paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
+            paymentAmountToMint > (initialPaymentBalance + premium) && paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
         );
 
         /* Maximum amount of OTokens possible to simulate assuming minted and initial 
         amount of payment token */
-        uint256 maxAmountOfOTokens = ((paymentAmountToMint -
-            initialPaymentBalance -
-            premium) * PERCENTAGE) / factor;
+        uint256 maxAmountOfOTokens = ((paymentAmountToMint - initialPaymentBalance - premium) * PERCENTAGE) / factor;
 
         /* Otoken amount must be some value between 0 and maximum amount calculated above */
         oTokensAmount = bound(oTokensAmount, 0, maxAmountOfOTokens);
@@ -241,11 +214,7 @@ contract OptionsTokenTest is Test {
         /* Payment balance after swap shall be less than borrowed asset + premium 
         so it make flashloan not profitable */
         uint256 borrowedAssetBalance = (oTokensAmount * factor) / PERCENTAGE;
-        paymentBalanceAfterSwap = bound(
-            paymentBalanceAfterSwap,
-            0,
-            (premium + borrowedAssetBalance)
-        );
+        paymentBalanceAfterSwap = bound(paymentBalanceAfterSwap, 0, (premium + borrowedAssetBalance));
 
         /* Want amount shall be grater than minWantAmount */
         minWantAmount = bound(minWantAmount, 1, 1e19);
@@ -301,33 +270,15 @@ contract OptionsTokenTest is Test {
         vm.stopPrank();
 
         vm.startPrank(keeper);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
-        );
-        strategySonneProxy.harvestOTokens(
-            oTokensAmount,
-            address(utMock),
-            minWantAmount
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()")));
+        strategySonneProxy.harvestOTokens(oTokensAmount, address(utMock), minWantAmount);
         vm.stopPrank();
 
         /* Check balances after compounding */
         /* Assertions - tx reverted so all calls shall be 0 */
-        assertEq(
-            utMock.nrOfCallsSwapBal() == 0,
-            true,
-            "Number of calls swapBal not equal 0"
-        );
-        assertEq(
-            utMock.nrOfCallsExercise() == 0,
-            true,
-            "Number of calls swapBal not equal 0"
-        );
-        assertEq(
-            utMock.nrOfCallsFlashloan() == 0,
-            true,
-            "Number of calls swapBal not equal 0"
-        );
+        assertEq(utMock.nrOfCallsSwapBal() == 0, true, "Number of calls swapBal not equal 0");
+        assertEq(utMock.nrOfCallsExercise() == 0, true, "Number of calls swapBal not equal 0");
+        assertEq(utMock.nrOfCallsFlashloan() == 0, true, "Number of calls swapBal not equal 0");
     }
 
     function test_utFlashloanNegativeScenario_WantIsZero(
@@ -343,7 +294,9 @@ contract OptionsTokenTest is Test {
         /* Fuzzed factor less than 100% */
         uint256 factor = 5000;
 
-        /*** Test vectors definitions ***/
+        /**
+         * Test vectors definitions **
+         */
 
         /* Payment token amount which is transfered at init and imitates initial 
         balance of the strategy before flashloan compound */
@@ -353,14 +306,12 @@ contract OptionsTokenTest is Test {
         tokens (initial amount + amount transferred after swap) 
         Cannot be higher than (UINT256_MAX / PERCENTAGE) - 11.5e54 ETH */
         vm.assume(
-            paymentAmountToMint > (initialPaymentBalance + premium) &&
-                paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
+            paymentAmountToMint > (initialPaymentBalance + premium) && paymentAmountToMint < (UINT256_MAX / PERCENTAGE)
         );
 
         /* Maximum amount of OTokens possible to simlate assuming minted and initial 
         amount of payment token */
-        uint256 maxAmountOfOTokens = ((paymentAmountToMint -
-            initialPaymentBalance) * PERCENTAGE) / factor;
+        uint256 maxAmountOfOTokens = ((paymentAmountToMint - initialPaymentBalance) * PERCENTAGE) / factor;
         vm.assume(oTokensAmount <= maxAmountOfOTokens);
 
         /* Borrowed token amount must reflect oTokenAmount value in payment token */
@@ -370,9 +321,8 @@ contract OptionsTokenTest is Test {
         it must be greater than borrowed asset + premium and 
         less than minted asset - initial balance*/
         vm.assume(
-            paymentBalanceAfterSwap > (premium + borrowedAssetBalance) &&
-                paymentBalanceAfterSwap <
-                (paymentAmountToMint - initialPaymentBalance)
+            paymentBalanceAfterSwap > (premium + borrowedAssetBalance)
+                && paymentBalanceAfterSwap < (paymentAmountToMint - initialPaymentBalance)
         );
 
         /* Want token shall be less than minWantAmount */
@@ -429,32 +379,14 @@ contract OptionsTokenTest is Test {
         vm.stopPrank();
 
         vm.startPrank(keeper);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()"))
-        );
-        strategySonneProxy.harvestOTokens(
-            oTokensAmount,
-            address(utMock),
-            minWantAmount
-        );
+        vm.expectRevert(bytes4(keccak256("OptionsCompounder__FlashloanNotProfitable()")));
+        strategySonneProxy.harvestOTokens(oTokensAmount, address(utMock), minWantAmount);
         vm.stopPrank();
 
         /* Check balances after compounding */
         /* Assertions - tx reverted so all calls shall be 0 */
-        assertEq(
-            utMock.nrOfCallsSwapBal() == 0,
-            true,
-            "Number of calls swapBal not equal 0"
-        );
-        assertEq(
-            utMock.nrOfCallsExercise() == 0,
-            true,
-            "Number of calls swapBal not equal 0"
-        );
-        assertEq(
-            utMock.nrOfCallsFlashloan() == 0,
-            true,
-            "Number of calls swapBal not equal 0"
-        );
+        assertEq(utMock.nrOfCallsSwapBal() == 0, true, "Number of calls swapBal not equal 0");
+        assertEq(utMock.nrOfCallsExercise() == 0, true, "Number of calls swapBal not equal 0");
+        assertEq(utMock.nrOfCallsFlashloan() == 0, true, "Number of calls swapBal not equal 0");
     }
 }
