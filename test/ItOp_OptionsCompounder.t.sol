@@ -47,7 +47,7 @@ contract OptionsTokenTest is Common {
         paymentUnderlyingBpt = OP_OATHV1_ETH_BPT;
         paymentWantBpt = OP_WETH_OP_USDC_BPT;
         balancerVault = OP_BEETX_VAULT;
-        routerV2 = ISwapRouter(OP_UNIV3_ROUTERV);
+        univ3Router = ISwapRouter(OP_UNIV3_ROUTERV);
         univ3Factory = IUniswapV3Factory(OP_UNIV3_FACTORY);
 
         /* Setup accounts */
@@ -187,6 +187,7 @@ contract OptionsTokenTest is Common {
             OP_DATA_PROVIDER,
             REWARDER,
             address(optionsTokenProxy),
+            address(exerciser),
             slippages,
             swapProps,
             oracles
@@ -227,8 +228,8 @@ contract OptionsTokenTest is Common {
             underlyingToken.balanceOf(address(exerciser))
         );
 
-        /* Prepare option tokens - distribute them to the specified strategy 
-        and approve for spending */
+        /* Prepare option tokens - distribute them to the specified strategy
+    and approve for spending */
         fixture_prepareOptionToken(
             amount,
             address(strategySonneProxy),

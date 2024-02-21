@@ -52,12 +52,17 @@ contract MockedStrategy is OptionsCompounder {
     bytes32 constant ADMIN = keccak256("ADMIN");
     bytes32 constant DEFAULT_ADMIN_ROLE = keccak256("DEFAULT_ADMIN_ROLE");
 
+    uint256 public compoundThreshold;
+    address public discountExercise;
+    uint256 public constant MIN_FLASHLOAN_PROFIT_AMOUNT = 1;
+
     constructor() {}
 
     function __MockedStrategy_init(
         address _swapper,
         address _want,
         address _optionsToken,
+        address _discountExercise,
         address _addressProvider,
         uint256[] memory _maxSwapSlippages,
         SwapProps[] memory _swapProps,
@@ -72,6 +77,8 @@ contract MockedStrategy is OptionsCompounder {
         );
         want = _want;
         swapper = _swapper;
+        compoundThreshold = 1e14;
+        discountExercise = _discountExercise;
     }
 
     /* Override functions */
@@ -105,7 +112,8 @@ contract MockedStrategy is OptionsCompounder {
     /**
      * @dev Shall be implemented in the parent contract
      * @return Keeper role of the strategy
-     * */
+     *
+     */
     function getKeeperRole() internal pure override returns (bytes32) {
         return KEEPER;
     }
@@ -113,11 +121,25 @@ contract MockedStrategy is OptionsCompounder {
     /**
      * @dev Shall be implemented in the parent contract
      * @return Admin roles of the strategy
-     * */
+     *
+     */
     function getAdminRoles() internal pure override returns (bytes32[] memory) {
         bytes32[] memory admins = new bytes32[](2);
         admins[0] = ADMIN;
         admins[1] = DEFAULT_ADMIN_ROLE;
         return admins;
+    }
+
+    function harvest() external {
+        uint256 _balance = IERC20(address(optionToken)).balanceOf(
+            address(this)
+        );
+        if (_balance > compoundThreshold) {
+            _harvestOTokens(
+                _balance,
+                discountExercise,
+                MIN_FLASHLOAN_PROFIT_AMOUNT
+            );
+        }
     }
 }

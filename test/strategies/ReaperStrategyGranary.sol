@@ -32,6 +32,7 @@ contract ReaperStrategyGranary is
     ILendingPoolAddressesProvider public addressProvider;
     IAaveProtocolDataProvider public dataProvider;
     IRewardsController public rewarder;
+    address public discountExercise;
 
     // this strategy's configurable tokens
     IAToken public gWant;
@@ -40,9 +41,11 @@ contract ReaperStrategyGranary is
     uint256 public maxLtv; // in hundredths of percent, 8000 = 80%
     uint256 public minLeverageAmount;
     uint256 public maxDeleverageLoopIterations;
+    uint256 public compoundThreshold;
     uint256 public constant LTV_SAFETY_ZONE = 0.98 ether;
     uint256 public constant LTV_UNIT = 1 ether;
     uint256 public constant LTV_SCALING_FACTOR = 0.0001 ether; // Used to convert the Granary LTV (in BPS) to units of 1e18
+    uint256 public constant MIN_FLASHLOAN_PROFIT_AMOUNT = 1;
 
     // Misc constants
     uint16 private constant LENDER_REFERRAL_CODE_NONE = 0;
@@ -73,6 +76,7 @@ contract ReaperStrategyGranary is
         address _dataProvider,
         address _rewarder,
         address _optionsToken,
+        address _discountExercise,
         uint256[] memory _maxSwapSlippages,
         SwapProps[] memory _swapProps,
         IOracle[] memory _oracles
@@ -96,10 +100,15 @@ contract ReaperStrategyGranary is
         );
         maxDeleverageLoopIterations = 10;
         minLeverageAmount = 1000;
+        compoundThreshold = 1e14;
 
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         dataProvider = IAaveProtocolDataProvider(_dataProvider);
         rewarder = IRewardsController(_rewarder);
+        if (optionToken.isExerciseContract(_discountExercise) == false) {
+            revert OptionsCompounder__NotExerciseContract();
+        }
+        discountExercise = _discountExercise;
 
         (, , address vToken) = IAaveProtocolDataProvider(dataProvider)
             .getReserveTokensAddresses(address(want));
@@ -123,6 +132,16 @@ contract ReaperStrategyGranary is
      */
     function _beforeHarvestSwapSteps() internal override {
         rewarder.claimAllRewardsToSelf(rewardClaimingTokens);
+        uint256 _balance = IERC20Upgradeable(address(optionToken)).balanceOf(
+            address(this)
+        );
+        if (_balance > compoundThreshold) {
+            _harvestOTokens(
+                _balance,
+                discountExercise,
+                MIN_FLASHLOAN_PROFIT_AMOUNT
+            );
+        }
     }
 
     function lendingPool() public view returns (ILendingPool) {
@@ -494,6 +513,19 @@ contract ReaperStrategyGranary is
         uint256 _ltvToScale
     ) internal view returns (uint256 scaledLTV) {
         return _ltvToScale * LTV_SCALING_FACTOR;
+    }
+
+    function setCompoundThreshold(uint256 _compoundThreshold) external {
+        _atLeastRole(STRATEGIST);
+        compoundThreshold = _compoundThreshold;
+    }
+
+    function setDiscountExercise(address _discountExercise) external {
+        _atLeastRole(STRATEGIST);
+        if (optionToken.isExerciseContract(_discountExercise) == false) {
+            revert OptionsCompounder__NotExerciseContract();
+        }
+        discountExercise = _discountExercise;
     }
 
     /* Override functions */

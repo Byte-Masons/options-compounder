@@ -55,7 +55,8 @@ address constant OP_UNIV3_ROUTERV = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
 address constant OP_UNIV3_FACTORY = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
 
 /* BSC */
-address constant BSC_BUSD = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
+address constant BSC_HBR = 0x42c95788F791a2be3584446854c8d9BB01BE88A9;
+address constant BSC_USDT = 0x55d398326f99059fF775485246999027B3197955;
 address constant BSC_BTCB = 0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c;
 address constant BSC_RUSDC = 0x3bDCEf9e656fD9D03eA98605946b4fbF362C342b;
 address constant BSC_THENA = 0xF4C8E32EaDEC4BFe97E0F595AdD0f4450a863a11;
@@ -64,7 +65,8 @@ address constant BSC_THENA_ROUTER = 0xd4ae6eCA985340Dd434D38F470aCCce4DC78D109;
 address constant BSC_THENA_FACTORY = 0x2c788FE40A417612cb654b14a944cd549B5BF130;
 address constant BSC_UNIV3_ROUTERV2 = 0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2;
 address constant BSC_UNIV3_FACTORY = 0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7;
-
+address constant BSC_PANCAKE_ROUTER = 0x1b81D678ffb9C0263b24A97847620C99d213eB14;
+address constant BSC_PANCAKE_FACTORY = 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865;
 /* ARB */
 address constant ARB_USDCE = 0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8;
 address constant ARB_USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831;
@@ -80,7 +82,7 @@ contract Common is Test {
     IERC20 underlyingToken;
     IERC20 wantToken;
     IThenaRamRouter thenaRamRouter;
-    ISwapRouter routerV2;
+    ISwapRouter univ3Router;
     IUniswapV3Factory univ3Factory;
 
     ReaperSwapper reaperSwapper;
@@ -203,7 +205,7 @@ contract Common is Test {
                 reaperSwapper.updateUniV3SwapPath(
                     paths[idx][0],
                     paths[idx][1],
-                    address(routerV2),
+                    address(univ3Router),
                     swapPathAndFees
                 );
 
@@ -214,7 +216,7 @@ contract Common is Test {
                 // reaperSwapper.updateUniV3SwapPath(
                 //     paths[idx][1],
                 //     paths[idx][0],
-                //     address(routerV2),
+                //     address(univ3Router),
                 //     swapPathAndFees
                 // );
             } else {
@@ -308,7 +310,7 @@ contract Common is Test {
                 );
             } else if (exchangeTypes[idx] == ExchangeType.UniV3) {
                 swapProps[idx] = SwapProps(
-                    address(routerV2),
+                    address(univ3Router),
                     ExchangeType.UniV3
                 );
             } else {

@@ -41,7 +41,7 @@ contract OptionsTokenTest is Common {
         underlyingToken = IERC20(ARB_RAM);
         wantToken = IERC20(ARB_USDC);
         thenaRamRouter = IThenaRamRouter(ARB_RAM_ROUTER);
-        routerV2 = ISwapRouter(ARB_RAM_ROUTERV2);
+        univ3Router = ISwapRouter(ARB_RAM_ROUTERV2);
         univ3Factory = IUniswapV3Factory(ARB_RAM_FACTORYV2);
 
         /* Setup accounts */
@@ -115,6 +115,7 @@ contract OptionsTokenTest is Common {
             address(reaperSwapper),
             address(wantToken),
             address(optionsTokenProxy),
+            address(exerciser),
             address(lendingPool),
             slippages,
             swapProps,

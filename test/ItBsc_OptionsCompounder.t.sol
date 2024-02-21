@@ -27,20 +27,25 @@ contract OptionsTokenTest is Common {
     MockedLendingPool lendingPool;
     MockedStrategy strategy;
     Helper helper;
-    uint256 initTwap;
+
+    // address public optionsTokenAddress =
+    //     0x45c19a3068642B98F5AEf1dEdE023443cd1FbFAd;
+    // address public discountExerciseAddress =
+    //     0x3Fbf4f9cf73162e4e156972540f53Dabe65c2862;
+    // address public bscTokenAdmin = 0x6eB1fF8E939aFBF3086329B2b32725b72095512C;
 
     function setUp() public {
         /* Common assignments */
         ExchangeType[] memory exchangeTypes = new ExchangeType[](2);
         exchangeTypes[0] = ExchangeType.ThenaRam;
-        exchangeTypes[1] = ExchangeType.ThenaRam;
+        exchangeTypes[1] = ExchangeType.UniV3;
         nativeToken = IERC20(BSC_WBNB);
-        paymentToken = nativeToken;
-        underlyingToken = IERC20(BSC_THENA);
-        wantToken = IERC20(BSC_BUSD);
+        paymentToken = IERC20(BSC_WBNB);
+        underlyingToken = IERC20(BSC_HBR);
+        wantToken = IERC20(BSC_USDT);
         thenaRamRouter = IThenaRamRouter(BSC_THENA_ROUTER);
-        routerV2 = ISwapRouter(BSC_UNIV3_ROUTERV2);
-        univ3Factory = IUniswapV3Factory(BSC_UNIV3_FACTORY);
+        univ3Router = ISwapRouter(BSC_PANCAKE_ROUTER);
+        univ3Factory = IUniswapV3Factory(BSC_PANCAKE_FACTORY);
 
         /* Setup accounts */
         fixture_setupAccountsAndFees(3000, 7000);
@@ -83,9 +88,9 @@ contract OptionsTokenTest is Common {
         // tokens[1] = address(paymentToken);
         //balancerTwapOracle = new MockBalancerTwapOracle(tokens);
         IOracle[] memory oracles = fixture_getOracles(exchangeTypes);
-
-        /* Option token deployment */
         vm.startPrank(owner);
+        /* Option token deployment */
+
         optionsToken = new OptionsToken();
         tmpProxy = new ERC1967Proxy(address(optionsToken), "");
         optionsTokenProxy = OptionsToken(address(tmpProxy));
@@ -118,6 +123,7 @@ contract OptionsTokenTest is Common {
             address(reaperSwapper),
             address(wantToken),
             address(optionsTokenProxy),
+            address(exerciser),
             address(lendingPool),
             slippages,
             swapProps,
@@ -144,7 +150,7 @@ contract OptionsTokenTest is Common {
             false
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
-        initTwap = AMOUNT.mulDivUp(1e18, underlyingBalance); // Inaccurate solution but it is not crucial to have real accurate oracle price
+
         underlyingToken.transfer(address(exerciser), underlyingBalance);
         paymentToken.transfer(
             address(lendingPool),

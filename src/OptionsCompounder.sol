@@ -194,6 +194,21 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         address exerciseContract,
         uint256 minWantAmount
     ) external onlyKeeper {
+        _harvestOTokens(amount, exerciseContract, minWantAmount);
+    }
+
+    /**
+     * @notice Function initiates flashloan to get assets for exercising options.
+     * @dev Can be executed only by keeper role. Reentrance protected.
+     * @param amount - amount of option tokens to exercise
+     * @param exerciseContract - address of exercise contract (DiscountContract)
+     * @param minWantAmount - minimal amount of want when the flashloan is considered as profitable
+     */
+    function _harvestOTokens(
+        uint256 amount,
+        address exerciseContract,
+        uint256 minWantAmount
+    ) internal {
         /* Check exercise contract validity */
         if (optionToken.isExerciseContract(exerciseContract) == false) {
             revert OptionsCompounder__NotExerciseContract();
