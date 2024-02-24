@@ -2,6 +2,7 @@
 
 pragma solidity ^0.8.0;
 
+import "forge-std/Test.sol";
 import {ReaperBaseStrategyv4} from "vault-v2/ReaperBaseStrategyv4.sol";
 import {IVault} from "vault-v2/interfaces/IVault.sol";
 import {IAToken} from "./interfaces/IAToken.sol";
@@ -14,24 +15,33 @@ import {SafeERC20Upgradeable} from "oz-upgradeable/token/ERC20/utils/SafeERC20Up
 import {IERC20Upgradeable} from "oz-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import {MathUpgradeable} from "oz-upgradeable/utils/math/MathUpgradeable.sol";
 import {ReaperMathUtils} from "vault-v2/libraries/ReaperMathUtils.sol";
-import {SwapProps, OptionsCompounder} from "../../src/OptionsCompounder.sol";
+import {IOptionsCompounder, IOptionsToken, OptionsCompounder__NotExerciseContract} from "../../src/interfaces/IOptionsCompounder.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
+
+struct Externals {
+    address vault;
+    address swapper;
+    address addressProvider;
+    address dataProvider;
+    address rewarder;
+    address optionsCompounder;
+    address discountExercise;
+}
 
 /**
  * @dev This strategy will deposit and leverage a token on Granary to maximize yield
  */
-contract ReaperStrategyGranary is
-    ReaperBaseStrategyv4,
-    ILeverageable,
-    OptionsCompounder
-{
+contract ReaperStrategyGranary is ReaperBaseStrategyv4, ILeverageable {
     using ReaperMathUtils for uint256;
     using SafeERC20Upgradeable for IERC20Upgradeable;
+
+    error NotExerciseContract();
 
     // 3rd-party contract addresses
     ILendingPoolAddressesProvider public addressProvider;
     IAaveProtocolDataProvider public dataProvider;
     IRewardsController public rewarder;
+    IOptionsCompounder public optionsCompounder;
     address public discountExercise;
 
     // this strategy's configurable tokens
@@ -64,56 +74,38 @@ contract ReaperStrategyGranary is
      * @notice see documentation for each variable above its respective declaration.
      */
     function initialize(
-        address _vault,
-        address _swapper,
+        Externals memory _externals,
         address[] memory _strategists,
         address[] memory _multisigRoles,
         address[] memory _keepers,
         IAToken _gWant,
         uint256 _targetLtv,
-        uint256 _maxLtv,
-        address _addressProvider,
-        address _dataProvider,
-        address _rewarder,
-        address _optionsToken,
-        address _discountExercise,
-        uint256[] memory _maxSwapSlippages,
-        SwapProps[] memory _swapProps,
-        IOracle[] memory _oracles
+        uint256 _maxLtv
     ) public initializer {
         gWant = _gWant;
         want = _gWant.UNDERLYING_ASSET_ADDRESS();
         __ReaperBaseStrategy_init(
-            _vault,
-            _swapper,
+            _externals.vault,
+            _externals.swapper,
             want,
             _strategists,
             _multisigRoles,
             _keepers
         );
-        __OptionsCompounder_init(
-            _optionsToken,
-            _addressProvider,
-            _maxSwapSlippages,
-            _swapProps,
-            _oracles
-        );
         maxDeleverageLoopIterations = 10;
         minLeverageAmount = 1000;
         compoundThreshold = 1e14;
-
-        addressProvider = ILendingPoolAddressesProvider(_addressProvider);
-        dataProvider = IAaveProtocolDataProvider(_dataProvider);
-        rewarder = IRewardsController(_rewarder);
-        if (optionToken.isExerciseContract(_discountExercise) == false) {
-            revert OptionsCompounder__NotExerciseContract();
-        }
-        discountExercise = _discountExercise;
+        addressProvider = ILendingPoolAddressesProvider(
+            _externals.addressProvider
+        );
+        dataProvider = IAaveProtocolDataProvider(_externals.dataProvider);
+        rewarder = IRewardsController(_externals.rewarder);
+        optionsCompounder = IOptionsCompounder(_externals.optionsCompounder);
+        setDiscountExercise(_externals.discountExercise);
 
         (, , address vToken) = IAaveProtocolDataProvider(dataProvider)
             .getReserveTokensAddresses(address(want));
         rewardClaimingTokens = [address(_gWant), vToken];
-
         _safeUpdateTargetLtv(_targetLtv, _maxLtv);
     }
 
@@ -128,15 +120,18 @@ contract ReaperStrategyGranary is
     }
 
     /**
-     * @dev Core function of the strat, in charge of collecting rewards
+     * @dev Core function of the strat, in charge of optionsTokenrewards
      */
     function _beforeHarvestSwapSteps() internal override {
-        rewarder.claimAllRewardsToSelf(rewardClaimingTokens);
-        uint256 _balance = IERC20Upgradeable(address(optionToken)).balanceOf(
-            address(this)
+        IERC20Upgradeable optionsToken = IERC20Upgradeable(
+            optionsCompounder.getOptionTokenAddress()
         );
+        rewarder.claimAllRewardsToSelf(rewardClaimingTokens);
+        uint256 _balance = optionsToken.balanceOf(address(this));
+
         if (_balance > compoundThreshold) {
-            _harvestOTokens(
+            optionsToken.approve(address(optionsCompounder), _balance);
+            optionsCompounder.harvestOTokens(
                 _balance,
                 discountExercise,
                 MIN_FLASHLOAN_PROFIT_AMOUNT
@@ -520,50 +515,19 @@ contract ReaperStrategyGranary is
         compoundThreshold = _compoundThreshold;
     }
 
-    function setDiscountExercise(address _discountExercise) external {
+    function setOptionsCompounder(address _optionsCompounder) external {
         _atLeastRole(STRATEGIST);
-        if (optionToken.isExerciseContract(_discountExercise) == false) {
-            revert OptionsCompounder__NotExerciseContract();
+        optionsCompounder = IOptionsCompounder(_optionsCompounder);
+    }
+
+    function setDiscountExercise(address _discountExercise) public {
+        _atLeastRole(STRATEGIST);
+        IOptionsToken optionsToken = IOptionsToken(
+            optionsCompounder.getOptionTokenAddress()
+        );
+        if (optionsToken.isExerciseContract(_discountExercise) == false) {
+            revert NotExerciseContract();
         }
         discountExercise = _discountExercise;
-    }
-
-    /* Override functions */
-    function wantToken() internal view virtual override returns (address) {
-        return want;
-    }
-
-    function swapperSwaps() internal view virtual override returns (address) {
-        return address(swapper);
-    }
-
-    /**
-     * @dev Subclasses should override this to specify their unique role-checking criteria.
-     * @return Returns bool value. {true} if {_account} has been granted {_role}.
-     */
-    function hasRoleForOptionsCompounder(
-        bytes32 _role,
-        address _account
-    ) internal view override returns (bool) {
-        return hasRole(_role, _account);
-    }
-
-    /**
-     * @dev Shall be implemented in the parent contract
-     * @return Keeper role of the strategy
-     * */
-    function getKeeperRole() internal pure override returns (bytes32) {
-        return KEEPER;
-    }
-
-    /**
-     * @dev Shall be implemented in the parent contract
-     * @return Admin roles of the strategy
-     * */
-    function getAdminRoles() internal pure override returns (bytes32[] memory) {
-        bytes32[] memory admins = new bytes32[](2);
-        admins[0] = ADMIN;
-        admins[1] = DEFAULT_ADMIN_ROLE;
-        return admins;
     }
 }

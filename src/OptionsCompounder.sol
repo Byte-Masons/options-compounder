@@ -7,134 +7,95 @@ import {IFlashLoanReceiver} from "aave-v2/interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
 import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
 import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
-import {IOptionsToken} from "optionsToken/src/interfaces/IOptionsToken.sol";
 import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
 import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
 import {IERC20} from "oz/token/ERC20/IERC20.sol";
-import {Initializable} from "oz-upgradeable/proxy/utils/Initializable.sol";
+// import {Initializable} from "oz-upgradeable/proxy/utils/Initializable.sol";
 import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
-
-enum ExchangeType {
-    UniV2,
-    Bal,
-    ThenaRam,
-    UniV3
-}
-
-struct SwapProps {
-    address exchangeAddress;
-    ExchangeType exchangeTypes;
-}
+import "./interfaces/IOptionsCompounder.sol";
+import {OwnableUpgradeable} from "oz-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "oz-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {SafeERC20} from "oz/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title Consumes options tokens, exercise them with flashloaned asset and converts gain to strategy want token
  * @author Eidolon, xRave110
  * @dev Abstract contract which shall be inherited by the strategy
  */
-abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
+contract OptionsCompounder is
+    IFlashLoanReceiver,
+    OwnableUpgradeable,
+    UUPSUpgradeable
+{
     using FixedPointMathLib for uint256;
+    using SafeERC20 for IERC20;
 
-    /* Enums */
-    enum SwapIdx {
-        UNDERLYING_TO_PAYMENT,
-        PAYMENT_TO_WANT,
-        MAX
+    /* Internal struct */
+    struct FlashloanParams {
+        uint256 optionsAmount;
+        address exerciserContract;
+        address sender;
+        uint256 initialBalance;
+        uint256 minPaymentAmount;
     }
-
-    /* Errors */
-    error OptionsCompounder__NotExerciseContract();
-    error OptionsCompounder__TooMuchAssetsLoaned();
-    error OptionsCompounder__FlashloanNotProfitable();
-    error OptionsCompounder__AssetNotEqualToPaymentToken();
-    error OptionsCompounder__FlashloanNotFinished();
-    error OptionsCompounder__OnlyKeeperAllowed();
-    error OptionsCompounder__OnlyAdminsAllowed();
-    error OptionsCompounder__FlashloanNotTriggered();
-    error OptionsCompounder__InvalidExchangeType(uint256 exchangeTypes);
-    error OptionsCompounder__WrongNumberOfParams();
-    error OptionsCompounder__SlippageGreaterThanMax();
-    error OptionsCompounder__NotEnoughUnderlyingTokens();
-    error OptionsCompounder__WrongMinWantAmount();
 
     /* Constants */
     uint8 constant MIN_NR_OF_FLASHLOAN_ASSETS = 1;
     uint256 constant PERCENTAGE = 10000;
 
+    uint256 public constant UPGRADE_TIMELOCK = 48 hours;
+    uint256 public constant FUTURE_NEXT_PROPOSAL_TIME = 365 days * 100;
+
     /* Storages */
+    address public swapper;
     ILendingPoolAddressesProvider private addressProvider;
     ILendingPool private lendingPool;
     bool private flashloanFinished;
-    IOracle[] private oracles;
+    IOracle private oracle;
+    IOptionsToken public optionsToken;
+    SwapProps public swapProps;
 
-    IOptionsToken public optionToken;
-    SwapProps[] public swapProps;
-    uint256[] public maxSwapSlippages;
+    uint256 public upgradeProposalTime;
+    address public nextImplementation;
 
     /* Events */
     event OTokenCompounded(
-        uint256 indexed gainInWant,
+        uint256 indexed gainInPayment,
         uint256 indexed returned
     );
 
     /* Modifiers */
-    modifier onlyKeeper() {
-        if (hasRoleForOptionsCompounder(getKeeperRole(), msg.sender) == false) {
-            revert OptionsCompounder__OnlyKeeperAllowed();
-        }
-        _;
-    }
 
-    modifier onlyAdmins() {
-        bool hasRole = false;
-        bytes32[] memory admins = getAdminRoles();
-        for (uint8 idx = 0; idx < admins.length; idx++) {
-            if (hasRoleForOptionsCompounder(admins[idx], msg.sender) != false) {
-                hasRole = true;
-                break;
-            }
-        }
-        if (hasRole == false) {
-            revert OptionsCompounder__OnlyAdminsAllowed();
-        }
-        _;
+    constructor() {
+        _disableInitializers();
     }
 
     /**
      * @notice Initializes params
      * @dev Replaces constructor due to upgradeable nature of the contract. Can be executed only once at init.
-     * @param _optionToken - option token address which allows to redeem underlying token via operation "exercise"
+     * @param _optionsToken - option token address which allows to redeem underlying token via operation "exercise"
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
-     * @param _maxSwapSlippages - max slippages acceptable for all swaps in the contract
      * @param _swapProps - swap properites for all swaps in the contract
-     * @param _oracles - oracles used in all swaps in the contract
-     * */
-    function __OptionsCompounder_init(
-        address _optionToken,
+     * @param _oracle - oracles used in all swaps in the contract
+     *
+     */
+    function initialize(
+        address _optionsToken,
         address _addressProvider,
-        uint256[] memory _maxSwapSlippages,
-        SwapProps[] memory _swapProps,
-        IOracle[] memory _oracles
-    ) internal onlyInitializing {
-        if (
-            _swapProps.length != uint256(SwapIdx.MAX) ||
-            _oracles.length != uint256(SwapIdx.MAX) ||
-            _maxSwapSlippages.length != uint256(SwapIdx.MAX)
-        ) {
-            revert OptionsCompounder__WrongNumberOfParams();
-        }
-        for (uint32 idx = 0; idx < maxSwapSlippages.length; idx++) {
-            if (_maxSwapSlippages[idx] > PERCENTAGE) {
-                revert OptionsCompounder__SlippageGreaterThanMax();
-            }
-        }
-        optionToken = IOptionsToken(_optionToken);
-        addressProvider = ILendingPoolAddressesProvider(_addressProvider);
-        lendingPool = ILendingPool(addressProvider.getLendingPool());
-        swapProps = _swapProps;
-        oracles = _oracles;
-        maxSwapSlippages = _maxSwapSlippages;
+        address _swapper,
+        SwapProps memory _swapProps,
+        IOracle _oracle
+    ) public initializer {
+        __Ownable_init();
+        setOptionToken(_optionsToken);
+        configSwapProps(_swapProps);
+        setOracle(_oracle);
+        setSwapper(_swapper);
         flashloanFinished = true;
+        setAddressProvider(_addressProvider);
+        __UUPSUpgradeable_init();
+        _clearUpgradeCooldown();
     }
 
     /***************************** Setters ***********************************/
@@ -143,41 +104,41 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      * @dev Can be executed only by admins
      * @param _optionToken - address of option token contract
      */
-    function setOptionToken(address _optionToken) external onlyAdmins {
-        optionToken = IOptionsToken(_optionToken);
+    function setOptionToken(address _optionToken) public onlyOwner {
+        if (_optionToken == address(0)) {
+            revert OptionsCompounder__ParamHasAddressZero();
+        }
+        optionsToken = IOptionsToken(_optionToken);
     }
 
-    function setMaxSwapSlippage(
-        uint256[] memory _maxSwapSlippages
-    ) external onlyAdmins {
-        if (_maxSwapSlippages.length != uint256(SwapIdx.MAX)) {
-            revert OptionsCompounder__WrongNumberOfParams();
+    function configSwapProps(SwapProps memory _swapProps) public onlyOwner {
+        if (_swapProps.maxSwapSlippage > PERCENTAGE) {
+            revert OptionsCompounder__SlippageGreaterThanMax();
         }
-        for (uint32 idx = 0; idx < maxSwapSlippages.length; idx++) {
-            if (_maxSwapSlippages[idx] > PERCENTAGE) {
-                revert OptionsCompounder__SlippageGreaterThanMax();
-            }
-        }
-        maxSwapSlippages = _maxSwapSlippages;
-    }
-
-    function configSwapProps(
-        SwapProps[] memory _swapProps
-    ) external onlyAdmins {
-        if (_swapProps.length != uint256(SwapIdx.MAX)) {
-            revert OptionsCompounder__WrongNumberOfParams();
+        if (_swapProps.exchangeAddress == address(0)) {
+            revert OptionsCompounder__ParamHasAddressZero();
         }
         swapProps = _swapProps;
     }
 
-    function setOracles(IOracle[] memory _oracles) external onlyAdmins {
-        if (_oracles.length != uint256(SwapIdx.MAX)) {
-            revert OptionsCompounder__WrongNumberOfParams();
+    function setOracle(IOracle _oracle) public onlyOwner {
+        if (address(_oracle) == address(0)) {
+            revert OptionsCompounder__ParamHasAddressZero();
         }
-        oracles = _oracles;
+        oracle = _oracle;
     }
 
-    function setAddressProvider(address _addressProvider) external onlyAdmins {
+    function setSwapper(address _swapper) public onlyOwner {
+        if (_swapper == address(0)) {
+            revert OptionsCompounder__ParamHasAddressZero();
+        }
+        swapper = _swapper;
+    }
+
+    function setAddressProvider(address _addressProvider) public onlyOwner {
+        if (_addressProvider == address(0)) {
+            revert OptionsCompounder__ParamHasAddressZero();
+        }
         addressProvider = ILendingPoolAddressesProvider(_addressProvider);
         lendingPool = ILendingPool(addressProvider.getLendingPool());
     }
@@ -193,7 +154,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         uint256 amount,
         address exerciseContract,
         uint256 minWantAmount
-    ) external onlyKeeper {
+    ) external {
         _harvestOTokens(amount, exerciseContract, minWantAmount);
     }
 
@@ -202,27 +163,26 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
      * @dev Can be executed only by keeper role. Reentrance protected.
      * @param amount - amount of option tokens to exercise
      * @param exerciseContract - address of exercise contract (DiscountContract)
-     * @param minWantAmount - minimal amount of want when the flashloan is considered as profitable
+     * @param minPaymentAmount - minimal amount of want when the flashloan is considered as profitable
      */
     function _harvestOTokens(
         uint256 amount,
         address exerciseContract,
-        uint256 minWantAmount
-    ) internal {
+        uint256 minPaymentAmount
+    ) private {
         /* Check exercise contract validity */
-        if (optionToken.isExerciseContract(exerciseContract) == false) {
+        if (optionsToken.isExerciseContract(exerciseContract) == false) {
             revert OptionsCompounder__NotExerciseContract();
         }
         /* Reentrance protection */
         if (flashloanFinished == false) {
             revert OptionsCompounder__FlashloanNotFinished();
         }
-        if (minWantAmount == 0) {
-            revert OptionsCompounder__WrongMinWantAmount();
+        if (minPaymentAmount == 0) {
+            revert OptionsCompounder__WrongMinPaymentAmount();
         }
         /* Locals */
         IERC20 paymentToken = DiscountExercise(exerciseContract).paymentToken();
-        uint256 initialBalance = paymentToken.balanceOf(address(this));
 
         address[] memory assets = new address[](1);
         assets[0] = address(paymentToken);
@@ -238,13 +198,15 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
 
         /* necesary params used during flashloan execution */
         bytes memory params = abi.encode(
-            amount,
-            exerciseContract,
-            initialBalance,
-            minWantAmount
+            FlashloanParams(
+                amount,
+                exerciseContract,
+                msg.sender,
+                paymentToken.balanceOf(address(this)),
+                minPaymentAmount
+            )
         );
         flashloanFinished = false;
-
         lendingPool.flashLoan(
             address(this), // receiver
             assets,
@@ -302,129 +264,121 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         uint256 premium,
         bytes calldata params
     ) private {
-        (
-            uint256 optionsAmount,
-            address exerciserContract,
-            uint256 initialBalance,
-            uint256 minWantAmount
-        ) = abi.decode(params, (uint256, address, uint256, uint256));
-        uint256 gainInPaymentToken = 0;
-        uint256 totalAmountToPay = amount + premium;
-        uint256 gainInWantToken = 0;
-        uint256 balanceOfUnderlyingToken = 0;
-        uint256 assetBalance = 0;
-        MinAmountOutData[] memory minAmountOutData = new MinAmountOutData[](
-            oracles.length
+        FlashloanParams memory flashloanParams = abi.decode(
+            params,
+            (FlashloanParams)
         );
+        uint256 assetBalance = 0;
+        MinAmountOutData memory minAmountOutData;
 
         /* Get underlying and payment tokens to make sure there is no change between 
         harvest and excersice */
-        IERC20 underlyingToken = DiscountExercise(exerciserContract)
-            .underlyingToken();
-        IERC20 paymentToken = DiscountExercise(exerciserContract)
-            .paymentToken();
-        uint256 initialWantBalance = IERC20(wantToken()).balanceOf(
-            address(this)
-        );
-        /* Asset and paymentToken should be the same addresses */
-        if (asset != address(paymentToken)) {
-            revert OptionsCompounder__AssetNotEqualToPaymentToken();
-        }
-        bytes memory exerciseParams = abi.encode(
-            DiscountExerciseParams({
-                maxPaymentAmount: amount,
-                deadline: type(uint256).max
-            })
-        );
-        if (underlyingToken.balanceOf(exerciserContract) < optionsAmount) {
-            revert OptionsCompounder__NotEnoughUnderlyingTokens();
-        }
-        /* Approve spending option token */
-        paymentToken.approve(exerciserContract, amount);
-        /* Exercise in order to get underlying token */
-        optionToken.exercise(
-            optionsAmount,
-            address(this),
-            exerciserContract,
-            exerciseParams
-        );
-        balanceOfUnderlyingToken = underlyingToken.balanceOf(address(this));
-        minAmountOutData[
-            uint256(SwapIdx.UNDERLYING_TO_PAYMENT)
-        ] = _getMinAmountOutData(
-            balanceOfUnderlyingToken,
-            maxSwapSlippages[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)],
-            SwapIdx.UNDERLYING_TO_PAYMENT
-        );
+        IERC20 underlyingToken = DiscountExercise(
+            flashloanParams.exerciserContract
+        ).underlyingToken();
+        {
+            IERC20 paymentToken = DiscountExercise(
+                flashloanParams.exerciserContract
+            ).paymentToken();
 
-        /* Approve the underlying token to make swap */
-        underlyingToken.approve(swapperSwaps(), balanceOfUnderlyingToken);
+            /* Asset and paymentToken should be the same addresses */
+            if (asset != address(paymentToken)) {
+                revert OptionsCompounder__AssetNotEqualToPaymentToken();
+            }
+        }
+        {
+            IERC20(address(optionsToken)).safeTransferFrom(
+                flashloanParams.sender,
+                address(this),
+                flashloanParams.optionsAmount
+            );
+            bytes memory exerciseParams = abi.encode(
+                DiscountExerciseParams({
+                    maxPaymentAmount: amount,
+                    deadline: type(uint256).max
+                })
+            );
+            if (
+                underlyingToken.balanceOf(flashloanParams.exerciserContract) <
+                flashloanParams.optionsAmount
+            ) {
+                revert OptionsCompounder__NotEnoughUnderlyingTokens();
+            }
+            /* Approve spending option token */
+            IERC20(asset).approve(flashloanParams.exerciserContract, amount);
+            /* Exercise in order to get underlying token */
+            optionsToken.exercise(
+                flashloanParams.optionsAmount,
+                address(this),
+                flashloanParams.exerciserContract,
+                exerciseParams
+            );
+        }
 
-        /* Swap underlying token to payment token (asset) */
-        _generalSwap(
-            swapProps[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)].exchangeTypes,
-            address(underlyingToken),
-            asset,
-            balanceOfUnderlyingToken,
-            minAmountOutData[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)],
-            swapProps[uint256(SwapIdx.UNDERLYING_TO_PAYMENT)].exchangeAddress
-        );
+        {
+            uint256 balanceOfUnderlyingToken = 0;
+            balanceOfUnderlyingToken = underlyingToken.balanceOf(address(this));
+            minAmountOutData = _getMinAmountOutData(
+                balanceOfUnderlyingToken,
+                swapProps.maxSwapSlippage
+            );
+
+            /* Approve the underlying token to make swap */
+            underlyingToken.approve(swapper, balanceOfUnderlyingToken);
+
+            /* Swap underlying token to payment token (asset) */
+
+            _generalSwap(
+                swapProps.exchangeTypes,
+                address(underlyingToken),
+                asset,
+                balanceOfUnderlyingToken,
+                minAmountOutData,
+                swapProps.exchangeAddress
+            );
+        }
 
         /* Calculate profit and revert if it is not profitable */
-        assetBalance = paymentToken.balanceOf(address(this));
-        if ((assetBalance - initialBalance) <= totalAmountToPay) {
-            revert OptionsCompounder__FlashloanNotProfitable();
-        }
-        /* Protected against underflows by statement above */
-        gainInPaymentToken = assetBalance - totalAmountToPay;
+        {
+            uint256 gainInPaymentToken = 0;
 
-        /* Get strategies want token */
-        if (wantToken() != asset) {
-            /* Approve the underlying token to make swap */
-            IERC20(asset).approve(swapperSwaps(), gainInPaymentToken);
-            /* Get minimal amount of data */
-            minAmountOutData[
-                uint256(SwapIdx.PAYMENT_TO_WANT)
-            ] = _getMinAmountOutData(
-                gainInPaymentToken,
-                maxSwapSlippages[uint256(SwapIdx.PAYMENT_TO_WANT)],
-                SwapIdx.PAYMENT_TO_WANT
-            );
-            _generalSwap(
-                swapProps[uint256(SwapIdx.PAYMENT_TO_WANT)].exchangeTypes,
-                asset,
-                wantToken(),
-                gainInPaymentToken,
-                minAmountOutData[uint256(SwapIdx.PAYMENT_TO_WANT)],
-                swapProps[uint256(SwapIdx.PAYMENT_TO_WANT)].exchangeAddress
-            );
-        }
-        gainInWantToken =
-            IERC20(wantToken()).balanceOf(address(this)) -
-            initialWantBalance;
-        if (gainInWantToken < minWantAmount) {
-            revert OptionsCompounder__FlashloanNotProfitable();
-        }
-        /* Approve lending pool to spend borrowed tokens + premium */
-        IERC20(asset).approve(address(lendingPool), totalAmountToPay);
+            uint256 totalAmountToPay = amount + premium;
+            assetBalance = IERC20(asset).balanceOf(address(this));
 
-        emit OTokenCompounded(gainInWantToken, totalAmountToPay);
+            if (
+                ((assetBalance < flashloanParams.initialBalance) ||
+                    (assetBalance - flashloanParams.initialBalance) <=
+                    (totalAmountToPay + flashloanParams.minPaymentAmount))
+            ) {
+                revert OptionsCompounder__FlashloanNotProfitableEnough();
+            }
+
+            /* Protected against underflows by statement above */
+            gainInPaymentToken = assetBalance - totalAmountToPay;
+
+            /* Approve lending pool to spend borrowed tokens + premium */
+            IERC20(asset).approve(address(lendingPool), totalAmountToPay);
+            IERC20(asset).safeTransfer(
+                flashloanParams.sender,
+                gainInPaymentToken
+            );
+
+            emit OTokenCompounded(gainInPaymentToken, totalAmountToPay);
+        }
     }
 
     /** @dev Private function that calculates minimal amount token out of swap using oracles
      *  @param _amountIn - amount of token to be swapped
      *  @param _maxSlippage - max allowed slippage
-     *  @param _idx - index of swap
      */
     function _getMinAmountOutData(
         uint256 _amountIn,
-        uint256 _maxSlippage,
-        SwapIdx _idx
+        uint256 _maxSlippage
     ) private view returns (MinAmountOutData memory) {
         MinAmountOutData memory minAmountOutData;
         uint256 minAmountOut = 0;
         /* Get price from oracle */
-        uint256 price = oracles[uint256(_idx)].getPrice();
+        uint256 price = oracle.getPrice();
         /* Deduct slippage amount from predicted amount */
         minAmountOut = ((_amountIn.mulWadUp(price)) -
             (((_amountIn.mulWadUp(price)) * _maxSlippage) / PERCENTAGE));
@@ -451,9 +405,9 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         MinAmountOutData memory minAmountOutData,
         address exchangeAddress
     ) private {
-        ISwapperSwaps swapper = ISwapperSwaps(swapperSwaps());
+        ISwapperSwaps _swapper = ISwapperSwaps(swapper);
         if (exType == ExchangeType.UniV2) {
-            swapper.swapUniV2(
+            _swapper.swapUniV2(
                 tokenIn,
                 tokenOut,
                 amount,
@@ -461,7 +415,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 exchangeAddress
             );
         } else if (exType == ExchangeType.Bal) {
-            swapper.swapBal(
+            _swapper.swapBal(
                 tokenIn,
                 tokenOut,
                 amount,
@@ -469,7 +423,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 exchangeAddress
             );
         } else if (exType == ExchangeType.ThenaRam) {
-            swapper.swapThenaRam(
+            _swapper.swapThenaRam(
                 tokenIn,
                 tokenOut,
                 amount,
@@ -477,7 +431,7 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
                 exchangeAddress
             );
         } else if (exType == ExchangeType.UniV3) {
-            swapper.swapUniV3(
+            _swapper.swapUniV3(
                 tokenIn,
                 tokenOut,
                 amount,
@@ -489,7 +443,55 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
         }
     }
 
+    /**
+     * @dev This function must be called prior to upgrading the implementation.
+     *      It's required to wait UPGRADE_TIMELOCK seconds before executing the upgrade.
+     */
+    function initiateUpgradeCooldown(
+        address _nextImplementation
+    ) external onlyOwner {
+        upgradeProposalTime = block.timestamp;
+        nextImplementation = _nextImplementation;
+    }
+
+    /**
+     * @dev This function is called:
+     *      - in initialize()
+     *      - as part of a successful upgrade
+     *      - manually to clear the upgrade cooldown.
+     */
+    function _clearUpgradeCooldown() internal {
+        upgradeProposalTime = block.timestamp + FUTURE_NEXT_PROPOSAL_TIME;
+    }
+
+    function clearUpgradeCooldown() external onlyOwner {
+        _clearUpgradeCooldown();
+    }
+
+    /**
+     * @dev This function must be overriden simply for access control purposes.
+     *      Only the owner can upgrade the implementation once the timelock
+     *      has passed.
+     */
+    function _authorizeUpgrade(
+        address _nextImplementation
+    ) internal override onlyOwner {
+        require(
+            upgradeProposalTime + UPGRADE_TIMELOCK < block.timestamp,
+            "Upgrade cooldown not initiated or still ongoing"
+        );
+        require(
+            _nextImplementation == nextImplementation,
+            "Incorrect implementation"
+        );
+        _clearUpgradeCooldown();
+    }
+
     /***************************** Getters ***********************************/
+    function getOptionTokenAddress() external view returns (address) {
+        return address(optionsToken);
+    }
+
     function ADDRESSES_PROVIDER()
         external
         view
@@ -501,43 +503,4 @@ abstract contract OptionsCompounder is IFlashLoanReceiver, Initializable {
     function LENDING_POOL() external view returns (ILendingPool) {
         return lendingPool;
     }
-
-    /** @dev Returns number of params needed to pass through swapProps, oracles and maxSwapSlippages */
-    function requiredParamsLength() external pure returns (uint256) {
-        return uint256(SwapIdx.MAX);
-    }
-
-    /* Virtual functions */
-    /**
-     * @dev Shall be implemented in the parent contract
-     * @return Want token of the strategy
-     */
-    function wantToken() internal view virtual returns (address);
-
-    /**
-     * @dev Shall be implemented in the parent contract
-     * @return Swapper contract used in the strategy
-     */
-    function swapperSwaps() internal view virtual returns (address);
-
-    /**
-     * @dev Subclasses should override this to specify their unique role-checking criteria.
-     * @return Returns bool value. {true} if {_account} has been granted {_role}.
-     */
-    function hasRoleForOptionsCompounder(
-        bytes32 _role,
-        address _account
-    ) internal view virtual returns (bool);
-
-    /**
-     * @dev Shall be implemented in the parent contract
-     * @return Keeper role of the strategy
-     * */
-    function getKeeperRole() internal pure virtual returns (bytes32);
-
-    /**
-     * @dev Shall be implemented in the parent contract
-     * @return Admin roles of the strategy
-     * */
-    function getAdminRoles() internal pure virtual returns (bytes32[] memory);
 }

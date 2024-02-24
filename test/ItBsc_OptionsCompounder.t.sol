@@ -10,23 +10,28 @@ import {MockBalancerTwapOracle} from "optionsToken/test/mocks/MockBalancerTwapOr
 import {Helper} from "./mocks/HelperFunctions.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {IAToken} from "./strategies/interfaces/IAToken.sol";
-import {MockedLendingPool, MockedStrategy} from "./mocks/MockedStrategy.sol";
 import {IThenaRamRouter} from "vault-v2/interfaces/IThenaRamRouter.sol";
+import {ReaperStrategyGranary, Externals} from "./strategies/ReaperStrategyGranary.sol";
+import {OptionsCompounder} from "../src/OptionsCompounder.sol";
+import {MockedLendingPool} from "../test/mocks/MockedStrategy.sol";
 
 contract OptionsTokenTest is Common {
     using FixedPointMathLib for uint256;
 
     /* Variable assignment (depends on chain) */
-    uint256 constant FORK_BLOCK = 35406073;
+    uint256 constant FORK_BLOCK = 36349190;
     string MAINNET_URL = vm.envString("BSC_RPC_URL_MAINNET");
 
     /* Contract variables */
-
-    ThenaOracle paymentWantOracle;
-    MockBalancerTwapOracle balancerTwapOracle;
-    MockedLendingPool lendingPool;
-    MockedStrategy strategy;
+    OptionsCompounder optionsCompounder;
+    ReaperStrategyGranary strategy;
     Helper helper;
+    IOracle oracle;
+
+    // string public vaultName = "?_? Vault";
+    // string public vaultSymbol = "rf-?_?";
+    // uint256 public vaultTvlCap = type(uint256).max;
+    // address public treasuryAddress = 0xC17DfA7Eb4300871D5f022c107E07F98c750472e;
 
     // address public optionsTokenAddress =
     //     0x45c19a3068642B98F5AEf1dEdE023443cd1FbFAd;
@@ -36,39 +41,40 @@ contract OptionsTokenTest is Common {
 
     function setUp() public {
         /* Common assignments */
-        ExchangeType[] memory exchangeTypes = new ExchangeType[](2);
-        exchangeTypes[0] = ExchangeType.ThenaRam;
-        exchangeTypes[1] = ExchangeType.UniV3;
+        ExchangeType exchangeType = ExchangeType.ThenaRam;
         nativeToken = IERC20(BSC_WBNB);
-        paymentToken = IERC20(BSC_WBNB);
+        paymentToken = nativeToken;
         underlyingToken = IERC20(BSC_HBR);
         wantToken = IERC20(BSC_USDT);
         thenaRamRouter = IThenaRamRouter(BSC_THENA_ROUTER);
-        univ3Router = ISwapRouter(BSC_PANCAKE_ROUTER);
+        swapRouter = ISwapRouter(BSC_PANCAKE_ROUTER);
         univ3Factory = IUniswapV3Factory(BSC_PANCAKE_FACTORY);
+        addressProvider = BSC_ADDRESS_PROVIDER;
+        // gWantAddress = BSC_GUSDT;
+        // dataProvider = BSC_DATA_PROVIDER;
+        // rewarder = BSC_REWARDER;
+
+        /* Setup network */
+        uint256 bscFork = vm.createFork(MAINNET_URL, FORK_BLOCK);
+        vm.selectFork(bscFork);
 
         /* Setup accounts */
         fixture_setupAccountsAndFees(3000, 7000);
         vm.deal(address(this), AMOUNT * 3);
         vm.deal(owner, AMOUNT * 3);
 
-        /* Setup network */
-        uint256 bscFork = vm.createFork(MAINNET_URL); //FORK_BLOCK);
-        vm.selectFork(bscFork);
-
         /* Setup roles */
         address[] memory strategists = new address[](1);
-        address[] memory multisigRoles = new address[](3);
-        address[] memory keepers = new address[](1);
+        // address[] memory multisigRoles = new address[](3);
+        // address[] memory keepers = new address[](1);
         strategists[0] = strategist;
-        multisigRoles[0] = management1;
-        multisigRoles[1] = management2;
-        multisigRoles[2] = management3;
-        keepers[0] = keeper;
+        // multisigRoles[0] = management1;
+        // multisigRoles[1] = management2;
+        // multisigRoles[2] = management3;
+        // keepers[0] = keeper;
 
         /* Variables */
-
-        SwapProps[] memory swapProps = fixture_getSwapProps(exchangeTypes);
+        SwapProps memory swapProps = fixture_getSwapProps(exchangeType, 200);
 
         /**** Contract deployments and configurations ****/
         helper = new Helper();
@@ -80,17 +86,13 @@ contract OptionsTokenTest is Common {
         reaperSwapper.initialize(strategists, address(this), address(this));
 
         /* Configure swapper */
-        fixture_configureSwapper(exchangeTypes);
+        fixture_updateSwapperPaths(exchangeType);
 
         /* Oracle mocks deployment */
-        // address[] memory tokens = new address[](2);
-        // tokens[0] = address(underlyingToken);
-        // tokens[1] = address(paymentToken);
-        //balancerTwapOracle = new MockBalancerTwapOracle(tokens);
-        IOracle[] memory oracles = fixture_getOracles(exchangeTypes);
-        vm.startPrank(owner);
-        /* Option token deployment */
+        oracle = fixture_getMockedOracle(exchangeType);
 
+        /* Option token deployment */
+        vm.startPrank(owner);
         optionsToken = new OptionsToken();
         tmpProxy = new ERC1967Proxy(address(optionsToken), "");
         optionsTokenProxy = OptionsToken(address(tmpProxy));
@@ -105,7 +107,7 @@ contract OptionsTokenTest is Common {
             owner,
             paymentToken,
             underlyingToken,
-            oracles[0],
+            oracle,
             PRICE_MULTIPLIER,
             treasuries,
             feeBPS
@@ -114,22 +116,50 @@ contract OptionsTokenTest is Common {
         optionsTokenProxy.setExerciseContract(address(exerciser), true);
 
         /* Strategy deployment */
-        uint256[] memory slippages = new uint256[](2);
-        slippages[0] = 200; // 2%
-        slippages[1] = 400; // 4%
-        lendingPool = new MockedLendingPool();
-        strategy = new MockedStrategy();
-        strategy.__MockedStrategy_init(
-            address(reaperSwapper),
-            address(wantToken),
+        strategy = new ReaperStrategyGranary();
+        tmpProxy = new ERC1967Proxy(address(strategy), "");
+        strategy = ReaperStrategyGranary(address(tmpProxy));
+        optionsCompounder = new OptionsCompounder();
+        tmpProxy = new ERC1967Proxy(address(optionsCompounder), "");
+        optionsCompounder = OptionsCompounder(address(tmpProxy));
+        MockedLendingPool addressProviderAndLendingPoolMock = new MockedLendingPool(
+                address(optionsCompounder)
+            );
+        optionsCompounder.initialize(
             address(optionsTokenProxy),
-            address(exerciser),
-            address(lendingPool),
-            slippages,
+            address(addressProviderAndLendingPoolMock),
+            address(reaperSwapper),
             swapProps,
-            oracles
+            oracle
         );
-        lendingPool.setStrategy(address(strategy));
+
+        // ReaperVaultV2 vault = new ReaperVaultV2(
+        //     address(wantToken),
+        //     vaultName,
+        //     vaultSymbol,
+        //     vaultTvlCap,
+        //     treasuryAddress,
+        //     strategists,
+        //     multisigRoles
+        // );
+        // Externals memory externals = Externals(
+        //     address(vault),
+        //     address(reaperSwapper),
+        //     addressProvider,
+        //     dataProvider,
+        //     rewarder,
+        //     address(optionsCompounder),
+        //     address(exerciser)
+        // );
+        // strategy.initialize(
+        //     externals,
+        //     strategists,
+        //     multisigRoles,
+        //     keepers,
+        //     IAToken(gWantAddress),
+        //     targetLtv,
+        //     maxLtv
+        // );
         vm.stopPrank();
 
         /* Prepare EOA and contracts for tests */
@@ -150,15 +180,13 @@ contract OptionsTokenTest is Common {
             false
         );
         uint256 underlyingBalance = underlyingToken.balanceOf(address(this));
-
-        underlyingToken.transfer(address(exerciser), underlyingBalance);
         paymentToken.transfer(
-            address(lendingPool),
+            address(addressProviderAndLendingPoolMock),
             paymentToken.balanceOf(address(this))
         );
+        underlyingToken.transfer(address(exerciser), underlyingBalance);
 
         /* Set up contracts */
-        // balancerTwapOracle.setTwapValue(initTwap);
         paymentToken.approve(address(exerciser), type(uint256).max);
     }
 
@@ -169,45 +197,44 @@ contract OptionsTokenTest is Common {
             MIN_OATH_FOR_FUZZING,
             underlyingToken.balanceOf(address(exerciser))
         );
+        uint256 minAmount = 5;
 
         /* Prepare option tokens - distribute them to the specified strategy 
         and approve for spending */
         fixture_prepareOptionToken(
             amount,
-            address(strategy),
+            address(optionsCompounder),
+            address(this),
             optionsTokenProxy,
             tokenAdmin
         );
 
         /* Check balances before compounding */
-        uint256 paymentTokenBalance = paymentToken.balanceOf(address(strategy));
-        uint256 wantBalance = wantToken.balanceOf(address(strategy));
+        uint256 paymentTokenBalance = paymentToken.balanceOf(
+            address(optionsCompounder)
+        );
 
-        vm.startPrank(keeper);
+        // vm.startPrank(address(strategy));
         /* already approved in fixture_prepareOptionToken */
-        strategy.harvestOTokens(amount, address(exerciser), NON_ZERO_PROFIT);
-        vm.stopPrank();
+        // uint256 _balance = optionsTokenProxy.balanceOf(address(optionsCompounder));
+        optionsCompounder.harvestOTokens(amount, address(exerciser), minAmount);
+        // vm.stopPrank();
 
         /* Assertions */
-        assertEq(
-            wantToken.balanceOf(address(strategy)) > wantBalance,
-            true,
+        assertGt(
+            paymentToken.balanceOf(address(this)),
+            paymentTokenBalance + minAmount,
             "Gain not greater than 0"
         );
         assertEq(
-            paymentTokenBalance <= paymentToken.balanceOf(address(strategy)),
-            true,
-            "Lower paymentToken balance than before"
+            optionsTokenProxy.balanceOf(address(optionsCompounder)),
+            0,
+            "Options token balance in compounder is 0"
         );
         assertEq(
-            wantBalance <= wantToken.balanceOf(address(strategy)),
-            true,
-            "Lower want balance than before"
-        );
-        assertEq(
-            0 == optionsTokenProxy.balanceOf(address(strategy)),
-            true,
-            "Options token balance is not 0"
+            paymentToken.balanceOf(address(optionsCompounder)),
+            0,
+            "Payment token balance in compounder is 0"
         );
     }
 }
