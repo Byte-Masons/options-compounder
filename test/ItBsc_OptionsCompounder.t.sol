@@ -128,7 +128,6 @@ contract OptionsTokenTest is Common {
         optionsCompounder.initialize(
             address(optionsTokenProxy),
             address(addressProviderAndLendingPoolMock),
-            address(strategy),
             address(reaperSwapper),
             swapProps,
             oracle
@@ -205,6 +204,7 @@ contract OptionsTokenTest is Common {
         fixture_prepareOptionToken(
             amount,
             address(optionsCompounder),
+            address(this),
             optionsTokenProxy,
             tokenAdmin
         );
@@ -214,21 +214,15 @@ contract OptionsTokenTest is Common {
             address(optionsCompounder)
         );
 
-        vm.startPrank(address(strategy));
+        // vm.startPrank(address(strategy));
         /* already approved in fixture_prepareOptionToken */
-        uint256 _balance = optionsTokenProxy.balanceOf(
-            address(optionsCompounder)
-        );
-        optionsCompounder.harvestOTokens(
-            _balance,
-            address(exerciser),
-            minAmount
-        );
-        vm.stopPrank();
+        // uint256 _balance = optionsTokenProxy.balanceOf(address(optionsCompounder));
+        optionsCompounder.harvestOTokens(amount, address(exerciser), minAmount);
+        // vm.stopPrank();
 
         /* Assertions */
         assertGt(
-            paymentToken.balanceOf(address(strategy)),
+            paymentToken.balanceOf(address(this)),
             paymentTokenBalance + minAmount,
             "Gain not greater than 0"
         );

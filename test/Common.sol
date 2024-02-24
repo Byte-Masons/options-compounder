@@ -139,15 +139,16 @@ contract Common is Test {
     /* Functions */
     function fixture_prepareOptionToken(
         uint256 _amount,
+        address _compounder,
         address _strategy,
         OptionsToken _optionsToken,
         address _tokenAdmin
     ) public {
         /* Mint options tokens and transfer them to the strategy (rewards simulation) */
-        vm.startPrank(_tokenAdmin);
-        _optionsToken.mint(_tokenAdmin, _amount);
-        _optionsToken.transfer(_strategy, _amount);
-        vm.stopPrank();
+        vm.prank(_tokenAdmin);
+        _optionsToken.mint(_strategy, _amount);
+        vm.prank(_strategy);
+        _optionsToken.approve(_compounder, _amount);
     }
 
     function fixture_updateSwapperPaths(ExchangeType exchangeType) public {

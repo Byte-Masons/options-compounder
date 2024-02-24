@@ -35,6 +35,8 @@ contract ReaperStrategyGranary is ReaperBaseStrategyv4, ILeverageable {
     using ReaperMathUtils for uint256;
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
+    error NotExerciseContract();
+
     // 3rd-party contract addresses
     ILendingPoolAddressesProvider public addressProvider;
     IAaveProtocolDataProvider public dataProvider;
@@ -128,7 +130,7 @@ contract ReaperStrategyGranary is ReaperBaseStrategyv4, ILeverageable {
         uint256 _balance = optionsToken.balanceOf(address(this));
 
         if (_balance > compoundThreshold) {
-            optionsToken.safeTransfer(address(optionsCompounder), _balance);
+            optionsToken.approve(address(optionsCompounder), _balance);
             optionsCompounder.harvestOTokens(
                 _balance,
                 discountExercise,
@@ -513,13 +515,18 @@ contract ReaperStrategyGranary is ReaperBaseStrategyv4, ILeverageable {
         compoundThreshold = _compoundThreshold;
     }
 
+    function setOptionsCompounder(address _optionsCompounder) external {
+        _atLeastRole(STRATEGIST);
+        optionsCompounder = IOptionsCompounder(_optionsCompounder);
+    }
+
     function setDiscountExercise(address _discountExercise) public {
         _atLeastRole(STRATEGIST);
         IOptionsToken optionsToken = IOptionsToken(
             optionsCompounder.getOptionTokenAddress()
         );
         if (optionsToken.isExerciseContract(_discountExercise) == false) {
-            revert OptionsCompounder__NotExerciseContract();
+            revert NotExerciseContract();
         }
         discountExercise = _discountExercise;
     }

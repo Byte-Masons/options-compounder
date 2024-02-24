@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 pragma solidity ^0.8.0;
-import "forge-std/Test.sol";
+
 /* Imports */
 import {IFlashLoanReceiver} from "aave-v2/interfaces/IFlashLoanReceiver.sol";
 import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
@@ -35,6 +35,7 @@ contract OptionsCompounder is
     struct FlashloanParams {
         uint256 optionsAmount;
         address exerciserContract;
+        address sender;
         uint256 initialBalance;
         uint256 minPaymentAmount;
     }
@@ -47,7 +48,6 @@ contract OptionsCompounder is
     uint256 public constant FUTURE_NEXT_PROPOSAL_TIME = 365 days * 100;
 
     /* Storages */
-    address public strategy;
     address public swapper;
     ILendingPoolAddressesProvider private addressProvider;
     ILendingPool private lendingPool;
@@ -66,12 +66,6 @@ contract OptionsCompounder is
     );
 
     /* Modifiers */
-    modifier onlyStrat() {
-        if (msg.sender != strategy) {
-            revert OptionsCompounder__OnlyStratAllowed();
-        }
-        _;
-    }
 
     constructor() {
         _disableInitializers();
@@ -84,12 +78,11 @@ contract OptionsCompounder is
      * @param _addressProvider - address lending pool address provider - necessary for flashloan operations
      * @param _swapProps - swap properites for all swaps in the contract
      * @param _oracle - oracles used in all swaps in the contract
-     * @param _strategy - strategy that will use compounder
-     * */
+     *
+     */
     function initialize(
         address _optionsToken,
         address _addressProvider,
-        address _strategy,
         address _swapper,
         SwapProps memory _swapProps,
         IOracle _oracle
@@ -98,7 +91,6 @@ contract OptionsCompounder is
         setOptionToken(_optionsToken);
         configSwapProps(_swapProps);
         setOracle(_oracle);
-        setStrategy(_strategy);
         setSwapper(_swapper);
         flashloanFinished = true;
         setAddressProvider(_addressProvider);
@@ -143,13 +135,6 @@ contract OptionsCompounder is
         swapper = _swapper;
     }
 
-    function setStrategy(address _strategy) public onlyOwner {
-        if (_strategy == address(0)) {
-            revert OptionsCompounder__ParamHasAddressZero();
-        }
-        strategy = _strategy;
-    }
-
     function setAddressProvider(address _addressProvider) public onlyOwner {
         if (_addressProvider == address(0)) {
             revert OptionsCompounder__ParamHasAddressZero();
@@ -169,7 +154,7 @@ contract OptionsCompounder is
         uint256 amount,
         address exerciseContract,
         uint256 minWantAmount
-    ) external onlyStrat {
+    ) external {
         _harvestOTokens(amount, exerciseContract, minWantAmount);
     }
 
@@ -216,6 +201,7 @@ contract OptionsCompounder is
             FlashloanParams(
                 amount,
                 exerciseContract,
+                msg.sender,
                 paymentToken.balanceOf(address(this)),
                 minPaymentAmount
             )
@@ -301,6 +287,11 @@ contract OptionsCompounder is
             }
         }
         {
+            IERC20(address(optionsToken)).safeTransferFrom(
+                flashloanParams.sender,
+                address(this),
+                flashloanParams.optionsAmount
+            );
             bytes memory exerciseParams = abi.encode(
                 DiscountExerciseParams({
                     maxPaymentAmount: amount,
@@ -367,7 +358,10 @@ contract OptionsCompounder is
 
             /* Approve lending pool to spend borrowed tokens + premium */
             IERC20(asset).approve(address(lendingPool), totalAmountToPay);
-            IERC20(asset).safeTransfer(strategy, gainInPaymentToken);
+            IERC20(asset).safeTransfer(
+                flashloanParams.sender,
+                gainInPaymentToken
+            );
 
             emit OTokenCompounded(gainInPaymentToken, totalAmountToPay);
         }

@@ -117,7 +117,6 @@ contract OptionsTokenTest is Common {
         optionsCompounder.initialize(
             address(optionsTokenProxy),
             address(addressProviderAndLendingPoolMock),
-            strategy,
             address(reaperSwapper),
             swapProps,
             oracle
@@ -165,6 +164,7 @@ contract OptionsTokenTest is Common {
         fixture_prepareOptionToken(
             amount,
             address(optionsCompounder),
+            strategy,
             optionsTokenProxy,
             tokenAdmin
         );
@@ -184,9 +184,8 @@ contract OptionsTokenTest is Common {
         vm.stopPrank();
 
         /* Assertions */
-        /* Assertions */
         assertGt(
-            paymentToken.balanceOf(address(strategy)),
+            paymentToken.balanceOf(strategy),
             paymentTokenBalance + minAmount,
             "Gain not greater than 0"
         );
@@ -222,14 +221,8 @@ contract OptionsTokenTest is Common {
         );
         /* Hacker tries to perform harvest */
         vm.startPrank(hacker);
-        vm.expectRevert(
-            bytes4(keccak256("OptionsCompounder__OnlyStratAllowed()"))
-        );
-        optionsCompounder.harvestOTokens(
-            amount,
-            address(exerciser),
-            NON_ZERO_PROFIT
-        );
+        // vm.expectRevert(bytes4(keccak256("OptionsCompounder__OnlyStratAllowed()")));
+        // optionsCompounder.harvestOTokens(amount, address(exerciser), NON_ZERO_PROFIT);
 
         /* Hacker tries to manipulate contract configuration */
         vm.expectRevert("Ownable: caller is not the owner");
@@ -270,6 +263,7 @@ contract OptionsTokenTest is Common {
         fixture_prepareOptionToken(
             amount,
             address(optionsCompounder),
+            strategy,
             optionsTokenProxy,
             tokenAdmin
         );
@@ -328,6 +322,7 @@ contract OptionsTokenTest is Common {
         fixture_prepareOptionToken(
             amount,
             address(optionsCompounder),
+            address(this),
             optionsTokenProxy,
             tokenAdmin
         );
@@ -339,13 +334,13 @@ contract OptionsTokenTest is Common {
             )
         );
         /* Already approved in fixture_prepareOptionToken */
-        vm.startPrank(strategy);
+        // vm.startPrank(strategy);
         optionsCompounder.harvestOTokens(
             amount,
             address(exerciser),
             minAmountOfPayment
         );
-        vm.stopPrank();
+        // vm.stopPrank();
     }
 
     function test_callExecuteOperationWithoutFlashloanTrigger(
@@ -400,6 +395,7 @@ contract OptionsTokenTest is Common {
         fixture_prepareOptionToken(
             amount,
             address(optionsCompounder),
+            strategy,
             optionsTokenProxy,
             tokenAdmin
         );
