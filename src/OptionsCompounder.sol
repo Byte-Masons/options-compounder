@@ -3,27 +3,27 @@
 pragma solidity ^0.8.0;
 
 /* Imports */
-import {IFlashLoanReceiver} from "aave-v2/interfaces/IFlashLoanReceiver.sol";
-import {ILendingPoolAddressesProvider} from "aave-v2/interfaces/ILendingPoolAddressesProvider.sol";
-import {ILendingPool} from "aave-v2/interfaces/ILendingPool.sol";
-import {DiscountExerciseParams, DiscountExercise} from "optionsToken/src/exercise/DiscountExercise.sol";
-import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
-import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
-import {IERC20} from "oz/token/ERC20/IERC20.sol";
-// import {Initializable} from "oz-upgradeable/proxy/utils/Initializable.sol";
-import {IOracle} from "optionsToken/src/interfaces/IOracle.sol";
-import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
+import {IFlashLoanReceiver} from "./interfaces/IFlashLoanReceiver.sol";
+import {ILendingPoolAddressesProvider} from "./interfaces/ILendingPoolAddressesProvider.sol";
+import {ILendingPool} from "./interfaces/ILendingPool.sol";
+import {IOracle} from "./interfaces/IOracle.sol";
 import "./interfaces/IOptionsCompounder.sol";
+import {DiscountExerciseParams, DiscountExercise} from "./exercise/DiscountExercise.sol";
+import {ReaperAccessControl} from "vault-v2/mixins/ReaperAccessControl.sol";
+// import {ISwapperSwaps, MinAmountOutData, MinAmountOutKind} from "vault-v2/ReaperSwapper.sol";
+import {IERC20} from "oz/token/ERC20/IERC20.sol";
+import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {OwnableUpgradeable} from "oz-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "oz-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {SafeERC20} from "oz/token/ERC20/utils/SafeERC20.sol";
+import {ExchangeType, SwapProps, SwapHelper} from "./helpers/SwapHelper.sol";
 
 /**
  * @title Consumes options tokens, exercise them with flashloaned asset and converts gain to strategy want token
  * @author Eidolon, xRave110
  * @dev Abstract contract which shall be inherited by the strategy
  */
-contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgradeable {
+contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgradeable, SwapHelper {
     using FixedPointMathLib for uint256;
     using SafeERC20 for IERC20;
 
@@ -50,7 +50,6 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
     bool private flashloanFinished;
     IOracle private oracle;
     IOptionsToken public optionsToken;
-    SwapProps public swapProps;
 
     uint256 public upgradeProposalTime;
     address public nextImplementation;
@@ -61,7 +60,7 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
     /* Modifiers */
 
     constructor() {
-        _disableInitializers();
+        // _disableInitializers();
     }
 
     /**
@@ -79,7 +78,7 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
     {
         __Ownable_init();
         setOptionToken(_optionsToken);
-        configSwapProps(_swapProps);
+        _setSwapProps(_swapProps);
         setOracle(_oracle);
         setSwapper(_swapper);
         flashloanFinished = true;
@@ -103,14 +102,8 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
         optionsToken = IOptionsToken(_optionToken);
     }
 
-    function configSwapProps(SwapProps memory _swapProps) public onlyOwner {
-        if (_swapProps.maxSwapSlippage > PERCENTAGE) {
-            revert OptionsCompounder__SlippageGreaterThanMax();
-        }
-        if (_swapProps.exchangeAddress == address(0)) {
-            revert OptionsCompounder__ParamHasAddressZero();
-        }
-        swapProps = _swapProps;
+    function setSwapProps(SwapProps memory _swapProps) external override onlyOwner {
+        _setSwapProps(_swapProps);
     }
 
     function setOracle(IOracle _oracle) public onlyOwner {
@@ -232,7 +225,7 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
     function exerciseOptionAndReturnDebt(address asset, uint256 amount, uint256 premium, bytes calldata params) private {
         FlashloanParams memory flashloanParams = abi.decode(params, (FlashloanParams));
         uint256 assetBalance = 0;
-        MinAmountOutData memory minAmountOutData;
+        uint256 minAmountOut;
 
         /* Get underlying and payment tokens to make sure there is no change between 
         harvest and excersice */
@@ -247,7 +240,8 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
         }
         {
             IERC20(address(optionsToken)).safeTransferFrom(flashloanParams.sender, address(this), flashloanParams.optionsAmount);
-            bytes memory exerciseParams = abi.encode(DiscountExerciseParams({maxPaymentAmount: amount, deadline: type(uint256).max}));
+            bytes memory exerciseParams =
+                abi.encode(DiscountExerciseParams({maxPaymentAmount: amount, deadline: type(uint256).max, isInstantExit: false}));
             if (underlyingToken.balanceOf(flashloanParams.exerciserContract) < flashloanParams.optionsAmount) {
                 revert OptionsCompounder__NotEnoughUnderlyingTokens();
             }
@@ -260,16 +254,13 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
         {
             uint256 balanceOfUnderlyingToken = 0;
             balanceOfUnderlyingToken = underlyingToken.balanceOf(address(this));
-            minAmountOutData = _getMinAmountOutData(balanceOfUnderlyingToken, swapProps.maxSwapSlippage);
+            minAmountOut = _getMinAmountOutData(balanceOfUnderlyingToken, swapProps.maxSwapSlippage, address(oracle));
 
             /* Approve the underlying token to make swap */
             underlyingToken.approve(swapper, balanceOfUnderlyingToken);
 
             /* Swap underlying token to payment token (asset) */
-
-            _generalSwap(
-                swapProps.exchangeTypes, address(underlyingToken), asset, balanceOfUnderlyingToken, minAmountOutData, swapProps.exchangeAddress
-            );
+            _generalSwap(swapProps.exchangeTypes, address(underlyingToken), asset, balanceOfUnderlyingToken, minAmountOut, swapProps.exchangeAddress);
         }
 
         /* Calculate profit and revert if it is not profitable */
@@ -296,53 +287,6 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
             IERC20(asset).safeTransfer(flashloanParams.sender, gainInPaymentToken);
 
             emit OTokenCompounded(gainInPaymentToken, totalAmountToPay);
-        }
-    }
-
-    /**
-     * @dev Private function that calculates minimal amount token out of swap using oracles
-     *  @param _amountIn - amount of token to be swapped
-     *  @param _maxSlippage - max allowed slippage
-     */
-    function _getMinAmountOutData(uint256 _amountIn, uint256 _maxSlippage) private view returns (MinAmountOutData memory) {
-        MinAmountOutData memory minAmountOutData;
-        uint256 minAmountOut = 0;
-        /* Get price from oracle */
-        uint256 price = oracle.getPrice();
-        /* Deduct slippage amount from predicted amount */
-        minAmountOut = ((_amountIn.mulWadUp(price)) - (((_amountIn.mulWadUp(price)) * _maxSlippage) / PERCENTAGE));
-        minAmountOutData = MinAmountOutData(MinAmountOutKind.Absolute, minAmountOut);
-        return minAmountOutData;
-    }
-
-    /**
-     * @dev Private function that allow to swap via multiple exchange types
-     *  @param exType - type of exchange
-     *  @param tokenIn - address of token in
-     *  @param tokenOut - address of token out
-     *  @param amount - amount of tokenIn to swap
-     *  @param minAmountOutData - minimal acceptable amount of tokenOut
-     *  @param exchangeAddress - address of the exchange
-     */
-    function _generalSwap(
-        ExchangeType exType,
-        address tokenIn,
-        address tokenOut,
-        uint256 amount,
-        MinAmountOutData memory minAmountOutData,
-        address exchangeAddress
-    ) private {
-        ISwapperSwaps _swapper = ISwapperSwaps(swapper);
-        if (exType == ExchangeType.UniV2) {
-            _swapper.swapUniV2(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
-        } else if (exType == ExchangeType.Bal) {
-            _swapper.swapBal(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
-        } else if (exType == ExchangeType.ThenaRam) {
-            _swapper.swapThenaRam(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
-        } else if (exType == ExchangeType.UniV3) {
-            _swapper.swapUniV3(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
-        } else {
-            revert OptionsCompounder__InvalidExchangeType(uint256(exType));
         }
     }
 
