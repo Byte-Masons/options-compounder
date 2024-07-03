@@ -61,7 +61,7 @@ contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgrad
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-        // _disableInitializers();
+        _disableInitializers();
     }
 
     /**
