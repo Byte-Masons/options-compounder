@@ -23,11 +23,7 @@ import {SafeERC20} from "oz/token/ERC20/utils/SafeERC20.sol";
  * @author Eidolon, xRave110
  * @dev Abstract contract which shall be inherited by the strategy
  */
-contract OptionsCompounder is
-    IFlashLoanReceiver,
-    OwnableUpgradeable,
-    UUPSUpgradeable
-{
+contract OptionsCompounder is IFlashLoanReceiver, OwnableUpgradeable, UUPSUpgradeable {
     using FixedPointMathLib for uint256;
     using SafeERC20 for IERC20;
 
@@ -60,10 +56,7 @@ contract OptionsCompounder is
     address public nextImplementation;
 
     /* Events */
-    event OTokenCompounded(
-        uint256 indexed gainInPayment,
-        uint256 indexed returned
-    );
+    event OTokenCompounded(uint256 indexed gainInPayment, uint256 indexed returned);
 
     /* Modifiers */
 
@@ -80,13 +73,10 @@ contract OptionsCompounder is
      * @param _oracle - oracles used in all swaps in the contract
      *
      */
-    function initialize(
-        address _optionsToken,
-        address _addressProvider,
-        address _swapper,
-        SwapProps memory _swapProps,
-        IOracle _oracle
-    ) public initializer {
+    function initialize(address _optionsToken, address _addressProvider, address _swapper, SwapProps memory _swapProps, IOracle _oracle)
+        public
+        initializer
+    {
         __Ownable_init();
         setOptionToken(_optionsToken);
         configSwapProps(_swapProps);
@@ -98,7 +88,9 @@ contract OptionsCompounder is
         _clearUpgradeCooldown();
     }
 
-    /***************************** Setters ***********************************/
+    /**
+     * Setters **********************************
+     */
     /**
      * @notice Sets option token address
      * @dev Can be executed only by admins
@@ -150,11 +142,7 @@ contract OptionsCompounder is
      * @param exerciseContract - address of exercise contract (DiscountContract)
      * @param minWantAmount - minimal amount of want when the flashloan is considered as profitable
      */
-    function harvestOTokens(
-        uint256 amount,
-        address exerciseContract,
-        uint256 minWantAmount
-    ) external {
+    function harvestOTokens(uint256 amount, address exerciseContract, uint256 minWantAmount) external {
         _harvestOTokens(amount, exerciseContract, minWantAmount);
     }
 
@@ -165,11 +153,7 @@ contract OptionsCompounder is
      * @param exerciseContract - address of exercise contract (DiscountContract)
      * @param minPaymentAmount - minimal amount of want when the flashloan is considered as profitable
      */
-    function _harvestOTokens(
-        uint256 amount,
-        address exerciseContract,
-        uint256 minPaymentAmount
-    ) private {
+    function _harvestOTokens(uint256 amount, address exerciseContract, uint256 minPaymentAmount) private {
         /* Check exercise contract validity */
         if (optionsToken.isExerciseContract(exerciseContract) == false) {
             revert OptionsCompounder__NotExerciseContract();
@@ -188,24 +172,15 @@ contract OptionsCompounder is
         assets[0] = address(paymentToken);
 
         uint256[] memory amounts = new uint256[](1);
-        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(
-            amount
-        );
+        amounts[0] = DiscountExercise(exerciseContract).getPaymentAmount(amount);
 
         // 0 = no debt, 1 = stable, 2 = variable
         uint256[] memory modes = new uint256[](1);
         modes[0] = 0;
 
         /* necesary params used during flashloan execution */
-        bytes memory params = abi.encode(
-            FlashloanParams(
-                amount,
-                exerciseContract,
-                msg.sender,
-                paymentToken.balanceOf(address(this)),
-                minPaymentAmount
-            )
-        );
+        bytes memory params =
+            abi.encode(FlashloanParams(amount, exerciseContract, msg.sender, paymentToken.balanceOf(address(this)), minPaymentAmount));
         flashloanFinished = false;
         lendingPool.flashLoan(
             address(this), // receiver
@@ -227,21 +202,16 @@ contract OptionsCompounder is
      *  @param premiums - list of premiums for flash loaned assets (only one premium allowed in this case)
      *  @param params - encoded data about options amount, exercise contract address, initial balance and minimal want amount
      */
-    function executeOperation(
-        address[] calldata assets,
-        uint256[] calldata amounts,
-        uint256[] calldata premiums,
-        address,
-        bytes calldata params
-    ) external override returns (bool) {
+    function executeOperation(address[] calldata assets, uint256[] calldata amounts, uint256[] calldata premiums, address, bytes calldata params)
+        external
+        override
+        returns (bool)
+    {
         if (flashloanFinished != false) {
             revert OptionsCompounder__FlashloanNotTriggered();
         }
-        if (
-            assets.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
-            amounts.length > MIN_NR_OF_FLASHLOAN_ASSETS ||
-            premiums.length > MIN_NR_OF_FLASHLOAN_ASSETS
-        ) {
+        if (assets.length > MIN_NR_OF_FLASHLOAN_ASSETS || amounts.length > MIN_NR_OF_FLASHLOAN_ASSETS || premiums.length > MIN_NR_OF_FLASHLOAN_ASSETS)
+        {
             revert OptionsCompounder__TooMuchAssetsLoaned();
         }
         /* Later the gain can be local variable */
@@ -250,7 +220,8 @@ contract OptionsCompounder is
         return true;
     }
 
-    /** @dev Private function that helps to execute flashloan and makes it more modular
+    /**
+     * @dev Private function that helps to execute flashloan and makes it more modular
      * Emits event with gain from the option exercise after repayment of all debt from flashloan
      * and amount of repaid assets
      *  @param asset - list of assets flash loaned (only one asset allowed in this case)
@@ -258,28 +229,16 @@ contract OptionsCompounder is
      *  @param premium - list of premiums for flash loaned assets (only one premium allowed in this case)
      *  @param params - encoded data about options amount, exercise contract address, initial balance and minimal want amount
      */
-    function exerciseOptionAndReturnDebt(
-        address asset,
-        uint256 amount,
-        uint256 premium,
-        bytes calldata params
-    ) private {
-        FlashloanParams memory flashloanParams = abi.decode(
-            params,
-            (FlashloanParams)
-        );
+    function exerciseOptionAndReturnDebt(address asset, uint256 amount, uint256 premium, bytes calldata params) private {
+        FlashloanParams memory flashloanParams = abi.decode(params, (FlashloanParams));
         uint256 assetBalance = 0;
         MinAmountOutData memory minAmountOutData;
 
         /* Get underlying and payment tokens to make sure there is no change between 
         harvest and excersice */
-        IERC20 underlyingToken = DiscountExercise(
-            flashloanParams.exerciserContract
-        ).underlyingToken();
+        IERC20 underlyingToken = DiscountExercise(flashloanParams.exerciserContract).underlyingToken();
         {
-            IERC20 paymentToken = DiscountExercise(
-                flashloanParams.exerciserContract
-            ).paymentToken();
+            IERC20 paymentToken = DiscountExercise(flashloanParams.exerciserContract).paymentToken();
 
             /* Asset and paymentToken should be the same addresses */
             if (asset != address(paymentToken)) {
@@ -287,41 +246,21 @@ contract OptionsCompounder is
             }
         }
         {
-            IERC20(address(optionsToken)).safeTransferFrom(
-                flashloanParams.sender,
-                address(this),
-                flashloanParams.optionsAmount
-            );
-            bytes memory exerciseParams = abi.encode(
-                DiscountExerciseParams({
-                    maxPaymentAmount: amount,
-                    deadline: type(uint256).max
-                })
-            );
-            if (
-                underlyingToken.balanceOf(flashloanParams.exerciserContract) <
-                flashloanParams.optionsAmount
-            ) {
+            IERC20(address(optionsToken)).safeTransferFrom(flashloanParams.sender, address(this), flashloanParams.optionsAmount);
+            bytes memory exerciseParams = abi.encode(DiscountExerciseParams({maxPaymentAmount: amount, deadline: type(uint256).max}));
+            if (underlyingToken.balanceOf(flashloanParams.exerciserContract) < flashloanParams.optionsAmount) {
                 revert OptionsCompounder__NotEnoughUnderlyingTokens();
             }
             /* Approve spending option token */
             IERC20(asset).approve(flashloanParams.exerciserContract, amount);
             /* Exercise in order to get underlying token */
-            optionsToken.exercise(
-                flashloanParams.optionsAmount,
-                address(this),
-                flashloanParams.exerciserContract,
-                exerciseParams
-            );
+            optionsToken.exercise(flashloanParams.optionsAmount, address(this), flashloanParams.exerciserContract, exerciseParams);
         }
 
         {
             uint256 balanceOfUnderlyingToken = 0;
             balanceOfUnderlyingToken = underlyingToken.balanceOf(address(this));
-            minAmountOutData = _getMinAmountOutData(
-                balanceOfUnderlyingToken,
-                swapProps.maxSwapSlippage
-            );
+            minAmountOutData = _getMinAmountOutData(balanceOfUnderlyingToken, swapProps.maxSwapSlippage);
 
             /* Approve the underlying token to make swap */
             underlyingToken.approve(swapper, balanceOfUnderlyingToken);
@@ -329,12 +268,7 @@ contract OptionsCompounder is
             /* Swap underlying token to payment token (asset) */
 
             _generalSwap(
-                swapProps.exchangeTypes,
-                address(underlyingToken),
-                asset,
-                balanceOfUnderlyingToken,
-                minAmountOutData,
-                swapProps.exchangeAddress
+                swapProps.exchangeTypes, address(underlyingToken), asset, balanceOfUnderlyingToken, minAmountOutData, swapProps.exchangeAddress
             );
         }
 
@@ -346,9 +280,10 @@ contract OptionsCompounder is
             assetBalance = IERC20(asset).balanceOf(address(this));
 
             if (
-                ((assetBalance < flashloanParams.initialBalance) ||
-                    (assetBalance - flashloanParams.initialBalance) <=
-                    (totalAmountToPay + flashloanParams.minPaymentAmount))
+                (
+                    (assetBalance < flashloanParams.initialBalance)
+                        || (assetBalance - flashloanParams.initialBalance) <= (totalAmountToPay + flashloanParams.minPaymentAmount)
+                )
             ) {
                 revert OptionsCompounder__FlashloanNotProfitableEnough();
             }
@@ -358,38 +293,30 @@ contract OptionsCompounder is
 
             /* Approve lending pool to spend borrowed tokens + premium */
             IERC20(asset).approve(address(lendingPool), totalAmountToPay);
-            IERC20(asset).safeTransfer(
-                flashloanParams.sender,
-                gainInPaymentToken
-            );
+            IERC20(asset).safeTransfer(flashloanParams.sender, gainInPaymentToken);
 
             emit OTokenCompounded(gainInPaymentToken, totalAmountToPay);
         }
     }
 
-    /** @dev Private function that calculates minimal amount token out of swap using oracles
+    /**
+     * @dev Private function that calculates minimal amount token out of swap using oracles
      *  @param _amountIn - amount of token to be swapped
      *  @param _maxSlippage - max allowed slippage
      */
-    function _getMinAmountOutData(
-        uint256 _amountIn,
-        uint256 _maxSlippage
-    ) private view returns (MinAmountOutData memory) {
+    function _getMinAmountOutData(uint256 _amountIn, uint256 _maxSlippage) private view returns (MinAmountOutData memory) {
         MinAmountOutData memory minAmountOutData;
         uint256 minAmountOut = 0;
         /* Get price from oracle */
         uint256 price = oracle.getPrice();
         /* Deduct slippage amount from predicted amount */
-        minAmountOut = ((_amountIn.mulWadUp(price)) -
-            (((_amountIn.mulWadUp(price)) * _maxSlippage) / PERCENTAGE));
-        minAmountOutData = MinAmountOutData(
-            MinAmountOutKind.Absolute,
-            minAmountOut
-        );
+        minAmountOut = ((_amountIn.mulWadUp(price)) - (((_amountIn.mulWadUp(price)) * _maxSlippage) / PERCENTAGE));
+        minAmountOutData = MinAmountOutData(MinAmountOutKind.Absolute, minAmountOut);
         return minAmountOutData;
     }
 
-    /** @dev Private function that allow to swap via multiple exchange types
+    /**
+     * @dev Private function that allow to swap via multiple exchange types
      *  @param exType - type of exchange
      *  @param tokenIn - address of token in
      *  @param tokenOut - address of token out
@@ -407,37 +334,13 @@ contract OptionsCompounder is
     ) private {
         ISwapperSwaps _swapper = ISwapperSwaps(swapper);
         if (exType == ExchangeType.UniV2) {
-            _swapper.swapUniV2(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
+            _swapper.swapUniV2(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
         } else if (exType == ExchangeType.Bal) {
-            _swapper.swapBal(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
+            _swapper.swapBal(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
         } else if (exType == ExchangeType.ThenaRam) {
-            _swapper.swapThenaRam(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
+            _swapper.swapThenaRam(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
         } else if (exType == ExchangeType.UniV3) {
-            _swapper.swapUniV3(
-                tokenIn,
-                tokenOut,
-                amount,
-                minAmountOutData,
-                exchangeAddress
-            );
+            _swapper.swapUniV3(tokenIn, tokenOut, amount, minAmountOutData, exchangeAddress);
         } else {
             revert OptionsCompounder__InvalidExchangeType(uint256(exType));
         }
@@ -447,9 +350,7 @@ contract OptionsCompounder is
      * @dev This function must be called prior to upgrading the implementation.
      *      It's required to wait UPGRADE_TIMELOCK seconds before executing the upgrade.
      */
-    function initiateUpgradeCooldown(
-        address _nextImplementation
-    ) external onlyOwner {
+    function initiateUpgradeCooldown(address _nextImplementation) external onlyOwner {
         upgradeProposalTime = block.timestamp;
         nextImplementation = _nextImplementation;
     }
@@ -473,30 +374,20 @@ contract OptionsCompounder is
      *      Only the owner can upgrade the implementation once the timelock
      *      has passed.
      */
-    function _authorizeUpgrade(
-        address _nextImplementation
-    ) internal override onlyOwner {
-        require(
-            upgradeProposalTime + UPGRADE_TIMELOCK < block.timestamp,
-            "Upgrade cooldown not initiated or still ongoing"
-        );
-        require(
-            _nextImplementation == nextImplementation,
-            "Incorrect implementation"
-        );
+    function _authorizeUpgrade(address _nextImplementation) internal override onlyOwner {
+        require(upgradeProposalTime + UPGRADE_TIMELOCK < block.timestamp, "Upgrade cooldown not initiated or still ongoing");
+        require(_nextImplementation == nextImplementation, "Incorrect implementation");
         _clearUpgradeCooldown();
     }
 
-    /***************************** Getters ***********************************/
+    /**
+     * Getters **********************************
+     */
     function getOptionTokenAddress() external view returns (address) {
         return address(optionsToken);
     }
 
-    function ADDRESSES_PROVIDER()
-        external
-        view
-        returns (ILendingPoolAddressesProvider)
-    {
+    function ADDRESSES_PROVIDER() external view returns (ILendingPoolAddressesProvider) {
         return addressProvider;
     }
 
